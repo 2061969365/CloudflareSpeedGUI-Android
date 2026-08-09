@@ -28,6 +28,7 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
     private val booleanEntries: Map<String, Entry<Boolean>> = mapOf(
         "multiPortEnabled" to Entry(booleanPreferencesKey("multiPortEnabled"), false),
         "fullScanEnabled" to Entry(booleanPreferencesKey("fullScanEnabled"), false),
+        "darkTheme" to Entry(booleanPreferencesKey("darkTheme"), false),
     )
 
     private val intEntries: Map<String, Entry<Int>> = mapOf(

@@ -28,16 +28,20 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun CfTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean? = null,
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    val effectiveDarkTheme = darkTheme ?: isSystemInDarkTheme()
+    val useDynamicColor = darkTheme == null &&
+        dynamicColor &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        useDynamicColor -> {
             val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            if (effectiveDarkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColors
+        effectiveDarkTheme -> DarkColors
         else -> LightColors
     }
 

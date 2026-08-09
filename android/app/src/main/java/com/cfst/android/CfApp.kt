@@ -19,8 +19,12 @@ import com.cfst.android.engine.cfst.CfstEngine
 import java.io.File
 import com.cfst.android.engine.model.IpSource
 import com.cfst.android.engine.model.ScanResult
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Dns
 import okhttp3.OkHttpClient
@@ -49,6 +53,23 @@ class AppContainer(private val context: Context) {
     val configRepository = ConfigRepository(dataStore)
 
     val lastResults = MutableStateFlow<List<ScanResult>>(emptyList())
+
+    val darkTheme = MutableStateFlow(false)
+
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        appScope.launch {
+            val stored = runCatching {
+                configRepository.flow.first()["darkTheme"] as? Boolean
+            }.getOrNull()
+            darkTheme.value = stored ?: false
+        }
+    }
+
+    fun setDarkTheme(value: Boolean) {
+        darkTheme.value = value
+    }
 
     private val db = Room.databaseBuilder(appContext, HistoryDb::class.java, "history.db").build()
     val historyRepository = HistoryRepository(db.historyDao())

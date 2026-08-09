@@ -22,6 +22,7 @@ data class SettingsUiState(
     val pingConcurrency: Int = 200,
     val speedConcurrency: Int = 5,
     val historyRetentionDays: Int = 30,
+    val darkTheme: Boolean = false,
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -80,10 +81,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         updateInt("historyRetentionDays", value, 1, 365) { s, v -> s.copy(historyRetentionDays = v) }
     }
 
+    fun setDarkTheme(value: Boolean) {
+        _state.update { it.copy(darkTheme = value) }
+        container.setDarkTheme(value)
+        viewModelScope.launch {
+            runCatching { container.configRepository.set("darkTheme", value) }
+        }
+    }
+
     fun resetDefaults() {
         viewModelScope.launch {
             container.configRepository.resetDefaults()
-            _state.value = buildState(container.configRepository.flow.first())
+            val rebuilt = buildState(container.configRepository.flow.first())
+            _state.value = rebuilt
+            container.setDarkTheme(rebuilt.darkTheme)
         }
     }
 
@@ -112,6 +123,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         pingConcurrency = intOf(cfg, "pingConcurrency", 200),
         speedConcurrency = intOf(cfg, "speedConcurrency", 5),
         historyRetentionDays = intOf(cfg, "historyRetentionDays", 30),
+        darkTheme = cfg["darkTheme"] as? Boolean ?: false,
     )
 
     private fun intOf(map: Map<String, Any>, key: String, default: Int): Int =
