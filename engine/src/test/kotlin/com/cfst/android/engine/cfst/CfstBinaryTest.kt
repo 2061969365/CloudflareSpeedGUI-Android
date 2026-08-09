@@ -23,7 +23,8 @@ class CfstBinaryTest {
                 "-t", "4",
                 "-httping",
                 "-dd",
-                "-tl", "200.0",
+                "-tl", "200",
+                "-url", CfstBinary.DEFAULT_SPEED_URL,
                 "-p", "0",
                 "-o", "out.csv",
             ),
@@ -32,9 +33,21 @@ class CfstBinaryTest {
     }
 
     @Test
-    fun latencyLimit_formatted_as_plain_float() {
+    fun latencyLimit_truncated_to_int_for_go_flag() {
         val cmd = CfstBinary.latencyCmd("ips.txt", 443, 300, 4, 200.5f, "out.csv")
-        assertEquals("200.5", cmd[cmd.indexOf("-tl") + 1])
+        assertEquals("200", cmd[cmd.indexOf("-tl") + 1])
+    }
+
+    @Test
+    fun latencyCmd_default_url_when_blank() {
+        val cmd = CfstBinary.latencyCmd("ips.txt", 443, 300, 4, 200f, "out.csv", url = "")
+        assertEquals("", cmd[cmd.indexOf("-url") + 1])
+    }
+
+    @Test
+    fun latencyCmd_custom_url_passed_through() {
+        val cmd = CfstBinary.latencyCmd("ips.txt", 443, 300, 4, 200f, "out.csv", url = "https://example.com/url")
+        assertEquals("https://example.com/url", cmd[cmd.indexOf("-url") + 1])
     }
 
     @Test

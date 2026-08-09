@@ -11,6 +11,7 @@ object CfstBinary {
         pingCount: Int,
         latencyLimit: Float,
         outCsv: String,
+        url: String = DEFAULT_SPEED_URL,
     ): List<String> = listOf(
         "-f", ipFile,
         "-tp", port.toString(),
@@ -18,7 +19,8 @@ object CfstBinary {
         "-t", pingCount.toString(),
         "-httping",
         "-dd",
-        "-tl", latencyLimit.toString(),
+        "-tl", latencyLimit.toInt().toString(),
+        "-url", url,
         "-p", "0",
         "-o", outCsv,
     )
