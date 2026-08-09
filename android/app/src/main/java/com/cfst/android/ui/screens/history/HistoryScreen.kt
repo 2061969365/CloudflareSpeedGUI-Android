@@ -1,7 +1,13 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+
 package com.cfst.android.ui.screens.history
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,14 +23,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -52,10 +63,17 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
     val entries by vm.all.collectAsState()
     val detailMap by vm.detailMap.collectAsState()
     val historySelection by vm.historySelection.collectAsState()
+    val isRefreshing by vm.isRefreshing.collectAsState()
     val context = LocalContext.current
     var expandedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var pendingDeleteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
+
+    val csvExporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        if (uri != null) vm.exportCsv(context, uri)
+    }
 
     Column(
         modifier = modifier
@@ -72,6 +90,19 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.weight(1f),
             )
+            IconButton(onClick = { vm.refresh() }) {
+                Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+            }
+            TextButton(onClick = {
+                if (entries.isEmpty()) {
+                    Toast.makeText(context, "暂无数据", Toast.LENGTH_SHORT).show()
+                } else {
+                    val timestamp = System.currentTimeMillis()
+                    csvExporter.launch("cf_speedtest_history_$timestamp.csv")
+                }
+            }) {
+                Text("导出CSV")
+            }
             if (entries.isNotEmpty()) {
                 TextButton(onClick = { showClearDialog = true }) {
                     Text("清空")
@@ -79,44 +110,54 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        if (entries.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "暂无历史记录",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(entries, key = { it.id }) { entry ->
-                    HistoryCard(
-                        entry = entry,
-                        expanded = expandedId == entry.id,
-                        records = detailMap[entry.id],
-                        selectedKeys = historySelection[entry.id] ?: emptySet(),
-                        onToggle = {
-                            expandedId = if (expandedId == entry.id) null else entry.id
-                            if (expandedId == entry.id) {
-                                vm.loadDetail(entry.id)
-                            } else {
-                                vm.collapseDetail(entry.id)
-                            }
-                        },
-                        onDelete = { pendingDeleteId = entry.id },
-                        onToggleSelect = { result ->
-                            vm.toggleHistorySelect(entry.id, result.ip, result.port)
-                        },
-                        onToggleSelectAll = { vm.toggleHistorySelectAll(entry.id) },
-                        onCopyRow = { result -> vm.copyHistoryRow(context, result) },
-                        onCopySelected = { vm.copyHistorySelected(context, entry.id) },
+        val pullRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { vm.refresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (entries.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "暂无历史记录",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(entries, key = { it.id }) { entry ->
+                        HistoryCard(
+                            entry = entry,
+                            expanded = expandedId == entry.id,
+                            records = detailMap[entry.id],
+                            selectedKeys = historySelection[entry.id] ?: emptySet(),
+                            onToggle = {
+                                expandedId = if (expandedId == entry.id) null else entry.id
+                                if (expandedId == entry.id) {
+                                    vm.loadDetail(entry.id)
+                                } else {
+                                    vm.collapseDetail(entry.id)
+                                }
+                            },
+                            onDelete = { pendingDeleteId = entry.id },
+                            onToggleSelect = { result ->
+                                vm.toggleHistorySelect(entry.id, result.ip, result.port)
+                            },
+                            onToggleSelectAll = { vm.toggleHistorySelectAll(entry.id) },
+                            onCopyRow = { result -> vm.copyHistoryRow(context, result) },
+                            onCopySelected = { vm.copyHistorySelected(context, entry.id) },
+                            onLongCopy = { vm.copyHistoryBest(context, entry.id) },
+                        )
+                    }
                 }
             }
         }
@@ -178,12 +219,16 @@ private fun HistoryCard(
     onToggleSelectAll: () -> Unit,
     onCopyRow: (ScanResult) -> Unit,
     onCopySelected: () -> Unit,
+    onLongCopy: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onToggle)
+                .combinedClickable(
+                    onClick = onToggle,
+                    onLongClick = onLongCopy,
+                )
                 .padding(12.dp),
         ) {
             Row(
@@ -309,7 +354,11 @@ private fun HistoryDetail(
                         Modifier
                     },
                 )
-                .padding(vertical = 2.dp),
+                .padding(vertical = 2.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { onCopyRow(result) },
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(
