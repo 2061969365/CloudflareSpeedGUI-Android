@@ -10,11 +10,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cfst.android.CfApp
 import com.cfst.android.engine.CsvCodec
+import com.cfst.android.engine.model.ResultFormatter
 import com.cfst.android.engine.model.ScanResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -86,6 +88,58 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                 toast(context, "导出失败")
             }
         }
+    }
+
+    private val _editing = MutableStateFlow(false)
+
+    val editing: StateFlow<Boolean> = _editing.asStateFlow()
+
+    private val _selectedIps = MutableStateFlow<Set<String>>(emptySet())
+
+    val selectedIps: StateFlow<Set<String>> = _selectedIps.asStateFlow()
+
+    fun setEditing(enabled: Boolean) {
+        _editing.value = enabled
+        if (!enabled) _selectedIps.value = emptySet()
+    }
+
+    fun toggleSelect(ip: String, port: Int) {
+        val key = rowKey(ip, port)
+        _selectedIps.update { cur ->
+            if (key in cur) cur - key else cur + key
+        }
+    }
+
+    fun selectAll() {
+        _selectedIps.value =
+            uiState.value.filteredResults.map { rowKey(it.ip, it.port) }.toSet()
+    }
+
+    fun clearSelection() {
+        _selectedIps.value = emptySet()
+    }
+
+    fun copyRow(context: Context, result: ScanResult) {
+        clipboardPut(context, ResultFormatter.formatCopyLine(result))
+        toast(context, "已复制 ${result.ip}")
+    }
+
+    fun copySelected(context: Context) {
+        val selected = uiState.value.filteredResults
+            .filter { rowKey(it.ip, it.port) in _selectedIps.value }
+        if (selected.isEmpty()) {
+            toast(context, "未选择任何结果")
+            return
+        }
+        clipboardPut(context, ResultFormatter.formatCopyLines(selected))
+        toast(context, "已复制 ${selected.size} 条结果")
+    }
+
+    private fun rowKey(ip: String, port: Int) = "$ip:$port"
+
+    private fun clipboardPut(context: Context, text: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("CF测速结果", text))
     }
 
     private fun computeState(results: List<ScanResult>, filter: ResultUiState): ResultUiState {

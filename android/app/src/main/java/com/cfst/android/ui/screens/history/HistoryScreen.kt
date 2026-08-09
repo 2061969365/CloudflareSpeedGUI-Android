@@ -1,5 +1,6 @@
 package com.cfst.android.ui.screens.history
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,11 +33,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cfst.android.data.HistoryEntry
 import com.cfst.android.engine.model.ScanResult
+import com.cfst.android.ui.components.CopyIcon
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,6 +51,8 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
     val vm: HistoryViewModel = viewModel()
     val entries by vm.all.collectAsState()
     val detailMap by vm.detailMap.collectAsState()
+    val historySelection by vm.historySelection.collectAsState()
+    val context = LocalContext.current
     var expandedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var pendingDeleteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
@@ -93,6 +100,7 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                         entry = entry,
                         expanded = expandedId == entry.id,
                         records = detailMap[entry.id],
+                        selectedKeys = historySelection[entry.id] ?: emptySet(),
                         onToggle = {
                             expandedId = if (expandedId == entry.id) null else entry.id
                             if (expandedId == entry.id) {
@@ -102,6 +110,12 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                             }
                         },
                         onDelete = { pendingDeleteId = entry.id },
+                        onToggleSelect = { result ->
+                            vm.toggleHistorySelect(entry.id, result.ip, result.port)
+                        },
+                        onToggleSelectAll = { vm.toggleHistorySelectAll(entry.id) },
+                        onCopyRow = { result -> vm.copyHistoryRow(context, result) },
+                        onCopySelected = { vm.copyHistorySelected(context, entry.id) },
                     )
                 }
             }
@@ -157,8 +171,13 @@ private fun HistoryCard(
     entry: HistoryEntry,
     expanded: Boolean,
     records: List<ScanResult>?,
+    selectedKeys: Set<String>,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
+    onToggleSelect: (ScanResult) -> Unit,
+    onToggleSelectAll: () -> Unit,
+    onCopyRow: (ScanResult) -> Unit,
+    onCopySelected: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -195,14 +214,28 @@ private fun HistoryCard(
             )
             if (expanded) {
                 Spacer(modifier = Modifier.height(8.dp))
-                HistoryDetail(records)
+                HistoryDetail(
+                    records = records,
+                    selectedKeys = selectedKeys,
+                    onToggleSelect = onToggleSelect,
+                    onToggleSelectAll = onToggleSelectAll,
+                    onCopyRow = onCopyRow,
+                    onCopySelected = onCopySelected,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun HistoryDetail(records: List<ScanResult>?) {
+private fun HistoryDetail(
+    records: List<ScanResult>?,
+    selectedKeys: Set<String>,
+    onToggleSelect: (ScanResult) -> Unit,
+    onToggleSelectAll: () -> Unit,
+    onCopyRow: (ScanResult) -> Unit,
+    onCopySelected: () -> Unit,
+) {
     if (records == null) {
         Text(
             text = "加载中...",
@@ -219,7 +252,21 @@ private fun HistoryDetail(records: List<ScanResult>?) {
         )
         return
     }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val selectedCount = records.count { rowKeyOf(it) in selectedKeys }
+        TextButton(onClick = onToggleSelectAll) {
+            Text(text = if (selectedCount == records.size) "取消全选" else "全选")
+        }
+        TextButton(onClick = onCopySelected) {
+            Text("复制($selectedCount)")
+        }
+    }
     Row(modifier = Modifier.fillMaxWidth()) {
+        Spacer(modifier = Modifier.width(52.dp))
         Text(
             text = "IP",
             modifier = Modifier.width(100.dp),
@@ -255,9 +302,20 @@ private fun HistoryDetail(records: List<ScanResult>?) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(
+                    if (rowKeyOf(result) in selectedKeys) {
+                        Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+                    } else {
+                        Modifier
+                    },
+                )
                 .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Checkbox(
+                checked = rowKeyOf(result) in selectedKeys,
+                onCheckedChange = { onToggleSelect(result) },
+            )
             Text(
                 text = result.ip,
                 modifier = Modifier.width(100.dp),
@@ -287,9 +345,21 @@ private fun HistoryDetail(records: List<ScanResult>?) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            IconButton(
+                onClick = { onCopyRow(result) },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    imageVector = CopyIcon,
+                    contentDescription = "复制",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
     }
 }
+
+private fun rowKeyOf(result: ScanResult): String = "${result.ip}:${result.port}"
 
 private fun entrySummary(entry: HistoryEntry): String {
     val base = "IP ${entry.ipCount} / 结果 ${entry.resultCount}"
