@@ -2,6 +2,8 @@ name: build
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -25,18 +27,20 @@ jobs:
           build-tools-version: 36.0.0
 
       - name: Engine tests
-        run: ./gradlew -p engine test
+        working-directory: engine
+        run: ./gradlew test
 
       - name: Android build
+        working-directory: android
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew -p android :app:assembleRelease
+        run: ./gradlew :app:assembleRelease
 
       - uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
