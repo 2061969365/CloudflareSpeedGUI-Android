@@ -9,12 +9,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-cfst:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -22,27 +22,6 @@ jobs:
 
       - name: Build cfst android binaries
         run: bash scripts/build-cfst-android.sh
-
-      - name: Commit cfst android binaries
-        run: |
-          set -euo pipefail
-          git config user.name "cfst-bot"
-          git config user.email "cfst-bot@users.noreply.github.com"
-          git add android/app/src/main/jniLibs
-          if git diff --cached --quiet; then
-            echo "Nothing to commit - jniLibs already up to date"
-          else
-            git commit -m "chore: build cfst android binaries"
-            git push origin main
-          fi
-
-  build:
-    runs-on: ubuntu-latest
-    needs: build-cfst
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-java@v4
         with:
