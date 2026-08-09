@@ -208,6 +208,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             }
             is ScanEvent.ResultReady -> {
                 lastResults = event.results
+                container.lastResults.value = event.results
                 val stats = ResultStats.compute(event.results)
                 val topCode = stats.topRegions.firstOrNull()?.first
                 _uiState.update {

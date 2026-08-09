@@ -14,7 +14,9 @@ import com.cfst.android.engine.LatencyProbe
 import com.cfst.android.engine.ScanController
 import com.cfst.android.engine.SpeedProbe
 import com.cfst.android.engine.model.IpSource
+import com.cfst.android.engine.model.ScanResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.Dns
 import okhttp3.OkHttpClient
@@ -41,6 +43,8 @@ class AppContainer(private val context: Context) {
     }
 
     val configRepository = ConfigRepository(dataStore)
+
+    val lastResults = MutableStateFlow<List<ScanResult>>(emptyList())
 
     private val db = Room.databaseBuilder(appContext, HistoryDb::class.java, "history.db").build()
     val historyRepository = HistoryRepository(db.historyDao())
