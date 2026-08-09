@@ -163,6 +163,12 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
+                            text = "丢包",
+                            modifier = Modifier.width(64.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
                             text = "速度",
                             modifier = Modifier.width(72.dp),
                             style = MaterialTheme.typography.labelMedium,
@@ -281,6 +287,11 @@ private fun ResultRow(
             style = MaterialTheme.typography.bodySmall,
         )
         Text(
+            text = formatLoss(result.lossPct),
+            modifier = Modifier.width(64.dp),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
             text = formatSpeed(result.speed),
             modifier = Modifier.width(72.dp),
             style = MaterialTheme.typography.bodySmall,
@@ -311,14 +322,14 @@ private fun rowKeyOf(result: ScanResult): String = "${result.ip}:${result.port}"
 
 private fun nextSortMode(current: ResultSortMode): ResultSortMode = when (current) {
     ResultSortMode.LATENCY_ASC -> ResultSortMode.SPEED_DESC
-    ResultSortMode.SPEED_DESC -> ResultSortMode.IP_ASC
-    ResultSortMode.IP_ASC -> ResultSortMode.LATENCY_ASC
+    ResultSortMode.SPEED_DESC -> ResultSortMode.LOSS_ASC
+    ResultSortMode.LOSS_ASC -> ResultSortMode.LATENCY_ASC
 }
 
 private fun sortModeLabel(mode: ResultSortMode): String = when (mode) {
     ResultSortMode.LATENCY_ASC -> "排序：延迟↑"
     ResultSortMode.SPEED_DESC -> "排序：速度↓"
-    ResultSortMode.IP_ASC -> "排序：IP↑"
+    ResultSortMode.LOSS_ASC -> "排序：丢包率↑"
 }
 
 private fun formatLatency(avgMs: Float?): String =
@@ -326,6 +337,9 @@ private fun formatLatency(avgMs: Float?): String =
 
 private fun formatSpeed(speed: Float?): String =
     speed?.let { String.format(Locale.US, "%.2f MB/s", it) } ?: "-"
+
+private fun formatLoss(lossPct: Float): String =
+    if (lossPct == 0f) "0%" else String.format(Locale.US, "%.1f%%", lossPct)
 
 private fun formatRegion(result: ScanResult): String =
     result.regionName.ifBlank { result.regionCode }.ifBlank { "-" }

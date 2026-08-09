@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class ResultSortMode { LATENCY_ASC, SPEED_DESC, IP_ASC }
+enum class ResultSortMode { LATENCY_ASC, SPEED_DESC, LOSS_ASC }
 
 data class ResultUiState(
     val results: List<ScanResult> = emptyList(),
@@ -168,7 +168,8 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                 base.sortedWith(
                     compareByDescending<ScanResult> { it.speed ?: -1f }.thenBy { it.ip },
                 )
-            ResultSortMode.IP_ASC -> base.sortedWith(compareBy<ScanResult> { it.ip })
+            ResultSortMode.LOSS_ASC ->
+                base.sortedWith(compareBy<ScanResult> { it.lossPct }.thenBy { it.ip })
         }
         return ResultUiState(
             results = results,
