@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class ScanService : Service() {
@@ -23,6 +24,7 @@ class ScanService : Service() {
     private lateinit var notifier: ScanNotifier
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var wakeLock: PowerManager.WakeLock? = null
+    private var receivedEvent = false
 
     override fun onCreate() {
         super.onCreate()
@@ -54,9 +56,14 @@ class ScanService : Service() {
         serviceScope.launch {
             controller.events.collect { event -> handleEvent(event) }
         }
+        serviceScope.launch {
+            delay(5_000)
+            if (!receivedEvent) stopScan()
+        }
     }
 
     private suspend fun handleEvent(event: ScanEvent) {
+        receivedEvent = true
         when (event) {
             is ScanEvent.Progress -> {
                 val etaText = event.etaMs?.let { "（预计 ${it / 1000}s 剩余）" } ?: ""
