@@ -24,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.cfst.android.BuildConfig
 
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
@@ -157,7 +156,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(text = "CF测速", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = "版本 ${BuildConfig.VERSION_NAME}",
+                    text = "版本 1.0.0",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
