@@ -110,4 +110,47 @@ class CfstBinaryTest {
     fun default_speed_url_constant() {
         assertEquals("https://speed.hatexianyu.ccwu.cc/?bytes=209715200", CfstBinary.DEFAULT_SPEED_URL)
     }
+
+    @Test
+    fun latencyCmd_concurrency_overrides_probe_count_in_n() {
+        val cmd = CfstBinary.latencyCmd(
+            ipFile = "ips.txt",
+            port = 443,
+            probeCount = 300,
+            pingCount = 4,
+            latencyLimit = 200f,
+            outCsv = "out.csv",
+            concurrency = 1500,
+        )
+        assertEquals("1500", cmd[cmd.indexOf("-n") + 1])
+    }
+
+    @Test
+    fun speedCmd_concurrency_overrides_default_200_in_n() {
+        val cmd = CfstBinary.speedCmd(
+            ipFile = "ips.txt",
+            port = 443,
+            url = "https://url",
+            downloadTime = 10,
+            downloadCount = 3,
+            speedLimit = 0f,
+            outCsv = "out.csv",
+            concurrency = 800,
+        )
+        assertEquals("800", cmd[cmd.indexOf("-n") + 1])
+    }
+
+    @Test
+    fun latency_timeout_scales_with_ip_count_and_inverse_concurrency() {
+        assertEquals(120_000L, CfstBinary.latencyTimeoutMs(ipCount = 100, concurrency = 100))
+        assertEquals(4_000_000L, CfstBinary.latencyTimeoutMs(ipCount = 1_000_000, concurrency = 100))
+        assertEquals(40_000_000L, CfstBinary.latencyTimeoutMs(ipCount = 1_000_000, concurrency = 10))
+        assertEquals(120_000L, CfstBinary.latencyTimeoutMs(ipCount = 1, concurrency = 0))
+    }
+
+    @Test
+    fun speed_timeout_scales_with_download_work() {
+        assertEquals(530_000L, CfstBinary.speedTimeoutMs(downloadTime = 10, downloadCount = 50))
+        assertEquals(120_000L, CfstBinary.speedTimeoutMs(downloadTime = 3, downloadCount = 3))
+    }
 }

@@ -4,6 +4,14 @@ object CfstBinary {
 
     const val DEFAULT_SPEED_URL = "https://speed.hatexianyu.ccwu.cc/?bytes=209715200"
 
+    const val DEFAULT_TIMEOUT_MS = 120_000L
+
+    fun latencyTimeoutMs(ipCount: Int, concurrency: Int, timeoutMs: Long = DEFAULT_TIMEOUT_MS): Long =
+        maxOf(timeoutMs, ipCount * 400L / maxOf(1, concurrency))
+
+    fun speedTimeoutMs(timeoutMs: Long = DEFAULT_TIMEOUT_MS, downloadTime: Int, downloadCount: Int): Long =
+        maxOf(timeoutMs, downloadCount.toLong() * downloadTime * 1000L + 30_000L)
+
     fun latencyCmd(
         ipFile: String,
         port: Int,
@@ -11,11 +19,12 @@ object CfstBinary {
         pingCount: Int,
         latencyLimit: Float,
         outCsv: String,
+        concurrency: Int = probeCount,
         url: String = DEFAULT_SPEED_URL,
     ): List<String> = listOf(
         "-f", ipFile,
         "-tp", port.toString(),
-        "-n", probeCount.toString(),
+        "-n", concurrency.toString(),
         "-t", pingCount.toString(),
         "-httping",
         "-dd",
@@ -33,11 +42,12 @@ object CfstBinary {
         downloadCount: Int,
         speedLimit: Float,
         outCsv: String,
+        concurrency: Int = 200,
     ): List<String> {
         val args = mutableListOf(
             "-f", ipFile,
             "-tp", port.toString(),
-            "-n", "200",
+            "-n", concurrency.toString(),
             "-t", "4",
             "-httping",
             "-dt", downloadTime.toString(),

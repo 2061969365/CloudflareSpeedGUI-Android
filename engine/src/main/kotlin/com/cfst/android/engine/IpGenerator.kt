@@ -26,10 +26,14 @@ object IpGenerator {
         out += bareIps
 
         if (fullScan) {
+            val seen = linkedSetOf<String>()
+            seen += bareIps
             networks.forEachIndexed { i, (line, net) ->
-                if (net.version == 4) out += net.expandAll().toList() else out += line
+                if (net.version == 4) net.expandAll().forEach { seen += it } else seen += line
                 report(progress, total, i + 1)
             }
+            progress(100)
+            return seen.toList()
         } else if (maxIps == 0) {
             networks.forEachIndexed { i, (_, net) ->
                 out += when {

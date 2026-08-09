@@ -51,12 +51,14 @@ class CfstEngine(
             pingCount = pingCount,
             latencyLimit = latencyLimit,
             outCsv = outCsv.absolutePath,
+            concurrency = concurrency,
         )
+        val dynamicTimeout = CfstBinary.latencyTimeoutMs(ips.size, concurrency, timeoutMs)
         val exit = runner.run(
             cmd = listOf(bin.absolutePath) + cmd,
             workDir = dir,
             env = env,
-            timeoutMs = timeoutMs,
+            timeoutMs = dynamicTimeout,
             onProgress = { (done, total) -> onProgress(done, total) },
         )
         if (exit != 0) return emptyList()
@@ -86,12 +88,14 @@ class CfstEngine(
             downloadCount = downloadCount,
             speedLimit = speedLimit,
             outCsv = outCsv.absolutePath,
+            concurrency = concurrency,
         )
+        val dynamicTimeout = CfstBinary.speedTimeoutMs(timeoutMs, downloadTime = downloadTime, downloadCount = downloadCount)
         val exit = runner.run(
             cmd = listOf(bin.absolutePath) + cmd,
             workDir = dir,
             env = env,
-            timeoutMs = timeoutMs,
+            timeoutMs = dynamicTimeout,
             onProgress = { (done, total) -> onProgress(done, total) },
         )
         if (exit != 0) return emptyList()

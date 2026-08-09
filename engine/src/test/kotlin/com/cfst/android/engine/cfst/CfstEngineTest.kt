@@ -18,6 +18,7 @@ class CfstEngineTest {
     private fun fakeRunner(
         exitCode: Int,
         progressLines: List<String> = emptyList(),
+        onRun: (timeoutMs: Long) -> Unit = {},
     ): CfstProcessRunner = CfstProcessRunner(
         processRunner = { cmd ->
             val outIdx = cmd.indexOf("-o")
@@ -28,6 +29,7 @@ class CfstEngineTest {
                     "1.1.1.1,4,4,0.00,50.00,12.50,HKG\n" +
                     "1.1.1.2,4,0,1.00,0.00,0.00,UNK\n")
             }
+            onRun(0)
             object : Process() {
                 override fun getOutputStream() = java.io.ByteArrayOutputStream()
                 override fun getInputStream() =
