@@ -1,10 +1,12 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package com.cfst.android.ui.screens.result
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +37,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,6 +58,7 @@ fun ResultScreen(modifier: Modifier = Modifier) {
     val state by vm.uiState.collectAsState()
     val editing by vm.editing.collectAsState()
     val selectedIps by vm.selectedIps.collectAsState()
+    val isRefreshing by vm.isRefreshing.collectAsState()
     val context = LocalContext.current
 
     val csvExporter = rememberLauncherForActivityResult(
@@ -134,7 +139,15 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            LazyColumn(modifier = Modifier.weight(1f)) {
+            val pullRefreshState = rememberPullToRefreshState()
+
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = { vm.refresh() },
+                state = pullRefreshState,
+                modifier = Modifier.weight(1f),
+            ) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
                 item(key = "header") {
                     Row(
                         modifier = Modifier
@@ -190,6 +203,7 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                         onToggleSelect = { vm.toggleSelect(result.ip, result.port) },
                         onCopy = { vm.copyRow(context, result) },
                     )
+                }
                 }
             }
 
@@ -260,7 +274,8 @@ private fun ResultRow(
                     Modifier
                 },
             )
-            .padding(vertical = 2.dp),
+            .padding(vertical = 2.dp)
+            .combinedClickable(onClick = {}, onLongClick = onCopy),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (editing) {

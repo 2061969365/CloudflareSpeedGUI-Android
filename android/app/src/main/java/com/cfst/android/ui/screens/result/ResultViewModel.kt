@@ -13,6 +13,7 @@ import com.cfst.android.engine.CsvCodec
 import com.cfst.android.engine.model.ResultFormatter
 import com.cfst.android.engine.model.ScanResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -39,10 +40,25 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _filterState = MutableStateFlow(ResultUiState())
 
+    private val _refreshTick = MutableStateFlow(0)
+
     val uiState: StateFlow<ResultUiState> =
-        combine(container.lastResults, _filterState) { results, filter ->
+        combine(container.lastResults, _filterState, _refreshTick) { results, filter, _ ->
             computeState(results, filter)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ResultUiState())
+
+    private val _isRefreshing = MutableStateFlow(false)
+
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    fun refresh() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            _refreshTick.update { it + 1 }
+            delay(350)
+            _isRefreshing.value = false
+        }
+    }
 
     fun setRegionFilter(region: String) {
         _filterState.update { it.copy(regionFilter = region) }
