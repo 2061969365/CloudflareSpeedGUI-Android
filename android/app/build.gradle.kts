@@ -20,8 +20,8 @@ android {
         applicationId = "com.cfst.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     sourceSets["main"].kotlin.srcDirs("../../engine/src/main/kotlin")
@@ -58,6 +58,9 @@ android {
     }
 
     packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/LICENSE.txt"

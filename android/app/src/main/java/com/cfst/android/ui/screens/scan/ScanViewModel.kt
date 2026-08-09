@@ -191,7 +191,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             downloadCount = intOf(persisted, "downloadCount", 50),
             speedLimit = floatOf(persisted, "speedLimit", 0f),
             downloadUrl = persisted["downloadUrl"] as? String
-                ?: "http://speed.cloudflare.com/__down?bytes=50000000",
+                ?: "https://speed.hatexianyu.ccwu.cc/?bytes=209715200",
             pingCount = intOf(persisted, "pingCount", 2),
             pingTimeoutMs = 2000,
             pingConcurrency = intOf(persisted, "pingConcurrency", 8),

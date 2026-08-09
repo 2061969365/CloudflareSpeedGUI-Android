@@ -20,7 +20,7 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
         "lastScene" to Entry(stringPreferencesKey("lastScene"), "quick"),
         "downloadUrl" to Entry(
             stringPreferencesKey("downloadUrl"),
-            "http://speed.cloudflare.com/__down?bytes=50000000",
+            "https://speed.hatexianyu.ccwu.cc/?bytes=209715200",
         ),
         "speedRegion" to Entry(stringPreferencesKey("speedRegion"), "全部"),
     )

@@ -95,6 +95,6 @@ class CfstBinaryTest {
 
     @Test
     fun default_speed_url_constant() {
-        assertEquals("https://cf.xiu2.xyz/url", CfstBinary.DEFAULT_SPEED_URL)
+        assertEquals("https://speed.hatexianyu.ccwu.cc/?bytes=209715200", CfstBinary.DEFAULT_SPEED_URL)
     }
 }

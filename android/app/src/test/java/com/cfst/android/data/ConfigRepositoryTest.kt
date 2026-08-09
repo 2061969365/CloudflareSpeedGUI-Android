@@ -35,7 +35,7 @@ class ConfigRepositoryTest {
         "latencyLimit" to 200,
         "probeCount" to 500,
         "fullScanProbeCount" to 5000,
-        "downloadUrl" to "http://speed.cloudflare.com/__down?bytes=50000000",
+        "downloadUrl" to "https://speed.hatexianyu.ccwu.cc/?bytes=209715200",
         "historyRetentionDays" to 30,
         "speedRegion" to "全部",
         "speedCount" to 50,

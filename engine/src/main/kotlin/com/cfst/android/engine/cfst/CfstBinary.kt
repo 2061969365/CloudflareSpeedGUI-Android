@@ -2,7 +2,7 @@ package com.cfst.android.engine.cfst
 
 object CfstBinary {
 
-    const val DEFAULT_SPEED_URL = "https://cf.xiu2.xyz/url"
+    const val DEFAULT_SPEED_URL = "https://speed.hatexianyu.ccwu.cc/?bytes=209715200"
 
     fun latencyCmd(
         ipFile: String,
