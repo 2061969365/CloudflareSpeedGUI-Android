@@ -1,0 +1,136 @@
+package com.cfst.android.engine
+
+import java.math.BigInteger
+import java.net.InetAddress
+import java.net.UnknownHostException
+import java.util.concurrent.ThreadLocalRandom
+
+class IpNetwork(
+    val original: String,
+    val version: Int,
+    val prefixLen: Int,
+    val numAddresses: Long,
+    private val network: BigInteger,
+    private val total: BigInteger,
+    private val usable: Long,
+) {
+
+    fun sampleHosts(n: Int): List<String> = when (version) {
+        4 -> sampleHostsV4(n)
+        6 -> sampleHostsV6(n)
+        else -> emptyList()
+    }
+
+    fun expandAll(): Sequence<String> = when (version) {
+        4 -> (1..usable).asSequence().map { toV4String(network.add(BigInteger.valueOf(it))) }
+        6 -> sequenceOf(original)
+        else -> emptySequence()
+    }
+
+    private fun sampleHostsV4(n: Int): List<String> {
+        if (n <= 0 || usable <= 0) return emptyList()
+        val want = minOf(n.toLong(), usable)
+        val offsets = if (want == usable) {
+            (1L..usable).toList()
+        } else {
+            val seen = HashSet<Long>()
+            val result = ArrayList<Long>(want.toInt())
+            while (result.size < want) {
+                val r = ThreadLocalRandom.current().nextLong(1L, usable + 1)
+                if (seen.add(r)) result.add(r)
+            }
+            result
+        }
+        return offsets.map { toV4String(network.add(BigInteger.valueOf(it))) }
+    }
+
+    private fun sampleHostsV6(n: Int): List<String> {
+        if (n <= 0 || usable <= 0) return emptyList()
+        val want = minOf(n.toLong(), usable)
+        val seen = HashSet<BigInteger>()
+        val result = ArrayList<BigInteger>(want.toInt())
+        while (result.size < want) {
+            val offset = BigInteger(128, ThreadLocalRandom.current()).mod(total).add(BigInteger.ONE)
+            if (seen.add(offset)) result.add(offset)
+        }
+        return result.map { toV6String(network.add(it)) }
+    }
+
+    private fun toV4String(addr: BigInteger): String {
+        val v = addr.toLong()
+        return "${(v ushr 24) and 0xFF}.${(v ushr 16) and 0xFF}.${(v ushr 8) and 0xFF}.${v and 0xFF}"
+    }
+
+    private fun toV6String(addr: BigInteger): String =
+        InetAddress.getByAddress(addr.toByteArray().let { bytes ->
+            ByteArray(16) { if (it < 16 - bytes.size) 0 else bytes[it - (16 - bytes.size)] }
+        }).hostAddress
+}
+
+object IpParser {
+
+    fun parseCidr(s: String): IpNetwork? {
+        val trimmed = s.trim()
+        if (trimmed.isEmpty()) return null
+        val slash = trimmed.lastIndexOf('/')
+        return if (slash < 0) {
+            parseV4(trimmed, 32) ?: parseV6(trimmed, 128)
+        } else {
+            val addr = trimmed.substring(0, slash).trim()
+            val prefix = trimmed.substring(slash + 1).trim().toIntOrNull() ?: return null
+            parseV4(addr, prefix) ?: parseV6(addr, prefix)
+        }
+    }
+
+    private fun parseV4(addr: String, prefix: Int): IpNetwork? {
+        if (prefix !in 0..32) return null
+        val octets = addr.split('.')
+        if (octets.size != 4) return null
+        var value = 0L
+        for (o in octets) {
+            if (o.isEmpty() || o.length > 3 || !o.all { it.isDigit() }) return null
+            val n = o.toInt()
+            if (n > 255) return null
+            value = (value shl 8) or n.toLong()
+        }
+        val mask = if (prefix == 0) 0L else ((-1L) shl (32 - prefix)) and 0xFFFFFFFFL
+        val network = value and mask
+        val total = 1L shl (32 - prefix)
+        val usable = (total - 2).coerceAtLeast(0L)
+        return IpNetwork(
+            original = addr + "/" + prefix,
+            version = 4,
+            prefixLen = prefix,
+            numAddresses = total,
+            network = BigInteger.valueOf(network),
+            total = BigInteger.valueOf(total),
+            usable = usable,
+        )
+    }
+
+    private fun parseV6(addr: String, prefix: Int): IpNetwork? {
+        if (prefix !in 0..128 || ':' !in addr) return null
+        val bytes = try {
+            InetAddress.getByName(addr).address
+        } catch (e: UnknownHostException) {
+            return null
+        }
+        if (bytes.size != 16) return null
+        val address = BigInteger(1, bytes)
+        val upper = BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE)
+        val lower = BigInteger.ONE.shiftLeft(128 - prefix).subtract(BigInteger.ONE)
+        val mask = upper.xor(lower)
+        val network = address.and(mask)
+        val total = BigInteger.ONE.shiftLeft(128 - prefix)
+        val usable = total.subtract(BigInteger.TWO).max(BigInteger.ZERO)
+        return IpNetwork(
+            original = addr + "/" + prefix,
+            version = 6,
+            prefixLen = prefix,
+            numAddresses = total.min(BigInteger.valueOf(Long.MAX_VALUE)).toLong(),
+            network = network,
+            total = total,
+            usable = usable.min(BigInteger.valueOf(Long.MAX_VALUE)).toLong(),
+        )
+    }
+}
