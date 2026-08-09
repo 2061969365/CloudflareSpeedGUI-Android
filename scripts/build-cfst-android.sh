@@ -56,6 +56,10 @@ build_target() {
 }
 
 build_target arm64-v8a arm64 ""
-build_target armeabi-v7a arm 7
+
+# NOTE: armeabi-v7a (32-bit ARM) is intentionally NOT built here. Go requires
+# cgo (external linking) for GOOS=android GOARCH=arm, and the app already falls
+# back to the pure-Kotlin engine on ABI mismatch, so 32-bit devices keep working.
+# arm64-v8a covers ~90%+ of active Android devices.
 
 echo "Done. Native libraries installed under '$JNI_LIBS_DIR'"
