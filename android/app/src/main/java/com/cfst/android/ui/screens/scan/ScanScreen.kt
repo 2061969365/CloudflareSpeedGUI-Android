@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenuItem
@@ -36,12 +37,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -77,12 +80,16 @@ private val SOURCE_OPTIONS = listOf(
 )
 
 @Composable
-fun ScanScreen(modifier: Modifier = Modifier) {
+fun ScanScreen(modifier: Modifier = Modifier, onScanFinished: () -> Unit = {}) {
     val vm: ScanViewModel = viewModel()
     val state by vm.uiState.collectAsState()
+    val scanFinished by vm.scanFinished.collectAsState()
     val context = LocalContext.current
     var speedExpanded by remember { mutableStateOf(false) }
     var regionExpanded by remember { mutableStateOf(false) }
+    var showQuickTestDialog by remember { mutableStateOf(false) }
+    var quickIpText by remember { mutableStateOf("") }
+    var quickPortText by remember { mutableStateOf("443") }
     val logListState = rememberLazyListState()
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -92,6 +99,13 @@ fun ScanScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(state.log.size) {
         if (state.log.isNotEmpty()) {
             logListState.scrollToItem(state.log.size - 1)
+        }
+    }
+
+    LaunchedEffect(scanFinished) {
+        if (scanFinished) {
+            onScanFinished()
+            vm.consumeScanFinished()
         }
     }
 
@@ -274,7 +288,7 @@ OutlinedTextField(
             }
         }
 
-        Button(
+Button(
             onClick = { if (state.running) vm.cancelScan() else vm.start() },
             modifier = Modifier
                 .fillMaxWidth()
@@ -283,12 +297,32 @@ OutlinedTextField(
             Text(if (state.running) "取消" else "开始扫描")
         }
 
+        OutlinedButton(
+            onClick = {
+                quickIpText = ""
+                quickPortText = "443"
+                showQuickTestDialog = true
+            },
+            enabled = !state.running,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+        ) {
+            Text("单IP测量")
+        }
+
         if (state.running) {
             LinearProgressIndicator(
                 progress = { state.progress.coerceIn(0, 100) / 100f },
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(text = state.phase, style = MaterialTheme.typography.bodyMedium)
+            if (state.quickIp != null) {
+                Text(
+                    text = "正在测速 IP: ${state.quickIp}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
         if (state.running) {
             state.etaMs?.let { eta ->
@@ -319,7 +353,7 @@ OutlinedTextField(
         if (state.log.isEmpty()) {
             Text(text = "暂无日志", style = MaterialTheme.typography.bodySmall)
         } else {
-            LazyColumn(
+LazyColumn(
                 state = logListState,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -334,6 +368,53 @@ OutlinedTextField(
                 }
             }
         }
+    }
+
+    if (showQuickTestDialog) {
+        AlertDialog(
+            onDismissRequest = { showQuickTestDialog = false },
+            title = { Text("单IP测量") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = quickIpText,
+                        onValueChange = { quickIpText = it },
+                        label = { Text("IP 地址") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = quickPortText,
+                        onValueChange = { raw ->
+                            quickPortText = raw.filter { it.isDigit() }
+                        },
+                        label = { Text("端口") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val ip = quickIpText.trim()
+                        val port = quickPortText.toIntOrNull() ?: 443
+                        if (ip.isNotEmpty()) {
+                            vm.quickTest(ip, port)
+                        }
+                        showQuickTestDialog = false
+                    },
+                ) {
+                    Text("开始测量")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQuickTestDialog = false }) {
+                    Text("取消")
+                }
+            },
+        )
     }
 }
 

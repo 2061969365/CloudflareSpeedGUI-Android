@@ -65,7 +65,17 @@ fun AppNavHost(modifier: Modifier = Modifier) {
             startDestination = TopLevelDestination.SCAN.route,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable(TopLevelDestination.SCAN.route) { ScanScreen() }
+            composable(TopLevelDestination.SCAN.route) {
+                ScanScreen(onScanFinished = {
+                    navController.navigate(TopLevelDestination.RESULT.route) {
+                        popUpTo(navController.graph.startDestinationId) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                })
+            }
             composable(TopLevelDestination.RESULT.route) { ResultScreen() }
             composable(TopLevelDestination.HISTORY.route) { HistoryScreen() }
             composable(TopLevelDestination.SETTINGS.route) { SettingsScreen() }

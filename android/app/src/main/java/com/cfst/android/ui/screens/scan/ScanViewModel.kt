@@ -51,6 +51,7 @@ data class ScanUiState(
     val etaMs: Long? = null,
     val log: List<String> = emptyList(),
     val customLines: List<String> = emptyList(),
+    val quickIp: String? = null,
 )
 
 class ScanViewModel(application: Application) : AndroidViewModel(application) {
@@ -60,6 +61,9 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(ScanUiState())
     val uiState: StateFlow<ScanUiState> = _uiState.asStateFlow()
+
+    private val _scanFinished = MutableStateFlow(false)
+    val scanFinished: StateFlow<Boolean> = _scanFinished.asStateFlow()
 
     private var scanStartedAt = 0L
     private var generatedCount = 0
@@ -73,6 +77,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     fun start() {
         if (_uiState.value.running) return
+        _scanFinished.value = false
         viewModelScope.launch {
             val request = withContext(Dispatchers.IO) { buildScanRequest() }
             scanStartedAt = System.currentTimeMillis()
@@ -89,6 +94,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     totalScanned = 0,
                     bestRegion = "-",
                     fastestMs = null,
+                    quickIp = null,
                 )
             }
             val app = getApplication<Application>()
@@ -98,6 +104,51 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             )
             controller.start(request)
         }
+    }
+
+    fun quickTest(ip: String, port: Int) {
+        if (_uiState.value.running) return
+        _scanFinished.value = false
+        viewModelScope.launch {
+            val request = withContext(Dispatchers.IO) {
+                buildScanRequest(overrideLines = listOf(ip.trim()))
+            }.copy(
+                ports = listOf(port),
+                maxIps = 0,
+                probeCount = 1,
+                fullScan = false,
+                multiPortBest = false,
+                speedEnabled = true,
+                region = "全部",
+            )
+            scanStartedAt = System.currentTimeMillis()
+            generatedCount = 0
+            lastResults = emptyList()
+            _uiState.update {
+                it.copy(
+                    running = true,
+                    phase = "生成IP列表",
+                    progress = 0,
+                    etaMs = null,
+                    log = emptyList(),
+                    resultCount = 0,
+                    totalScanned = 0,
+                    bestRegion = "-",
+                    fastestMs = null,
+                    quickIp = ip.trim(),
+                )
+            }
+            val app = getApplication<Application>()
+            ContextCompat.startForegroundService(
+                app,
+                Intent(app, ScanService::class.java).setAction(ScanService.ACTION_START),
+            )
+            controller.start(request)
+        }
+    }
+
+    fun consumeScanFinished() {
+        _scanFinished.value = false
     }
 
     fun cancelScan() {
@@ -185,10 +236,10 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun buildScanRequest(): ScanRequest {
+    private suspend fun buildScanRequest(overrideLines: List<String>? = null): ScanRequest {
         val state = _uiState.value
         val persisted = container.configRepository.flow.first()
-        val customLines = when (state.source) {
+        val customLines = overrideLines ?: when (state.source) {
             IpSource.OFFICIAL, IpSource.CMIP -> container.assetIpLines(state.source)
             IpSource.CUSTOM -> state.customLines
         }
@@ -257,7 +308,8 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(log = it.log + "错误: ${event.message}")
             }
             ScanEvent.Done -> {
-                _uiState.update { it.copy(running = false) }
+                _uiState.update { it.copy(running = false, quickIp = null) }
+                _scanFinished.value = true
                 persistHistoryIfNeeded()
             }
         }
