@@ -20,8 +20,8 @@ android {
         applicationId = "com.cfst.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "1.2.0"
     }
 
     sourceSets["main"].kotlin.srcDirs("../../engine/src/main/kotlin")
