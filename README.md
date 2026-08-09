@@ -6,6 +6,7 @@
 - 一键极速 / 单端口快速 / 自定义扫描三种模式
 - 官方库（约 150 万 IP）与 CMIP（约 6.3 万 IP）两种内置 IP 来源，也可导入自定义 IP 文件
 - 多端口择优、全量扫描、下载速度测试（可按地区筛选、限制数量）
+- 测速内核：内置 CloudflareSpeedTest（cfst）Android 原生二进制（HTTPing 延迟 + 下载测速），不可用时自动回退到纯 Kotlin 引擎
 - 结果表格展示（IP / 端口 / 延迟 / 速度 / 地区），支持复制与导出 CSV
 - 扫描历史记录与设置项本地保存
 
@@ -28,18 +29,16 @@ APK 输出路径：`android/app/build/outputs/apk/release/app-release.apk`
 
 ## 构建说明 / Building
 
-`libcfst.so`（CloudflareSpeedTest 的 Android 原生库）已编译好并提交在仓库中，本地构建无需 Go 工具链。如需重新编译，需先安装 Go 1.21+：
+`libcfst.so`（CloudflareSpeedTest 的 Android 原生库，v2.3.5，仅 arm64-v8a）由 CI 在每次构建时内联编译并打入 APK，本地构建无需 Go 工具链。如需手动重编，安装 Go 1.21+ 后运行：
 
 ```bash
 bash scripts/build-cfst-android.sh          # 默认编译 v2.3.5
 bash scripts/build-cfst-android.sh v2.3.5   # 指定 tag
 ```
 
-脚本会把产物分别写到：
-- `android/app/src/main/jniLibs/arm64-v8a/libcfst.so`
-- `android/app/src/main/jniLibs/armeabi-v7a/libcfst.so`
+产物写入 `android/app/src/main/jniLibs/arm64-v8a/libcfst.so`。
 
-CI（`.github/workflows/build.yml` 的 `build-cfst` job）会在每次 push 到 main 时自动编译并将生成的 `.so` 提交回仓库；首次运行后仓库即自带这两个 ABI 的二进制，后续构建 APK 时直接复用。
+> 说明：仅构建 arm64-v8a（覆盖约 90%+ 活跃安卓设备）。Go 的 `GOOS=android GOARCH=arm` 需要 cgo 外部链接，纯 Go 无法产出 32 位二进制；32 位设备上 app 会自动回退到内置的纯 Kotlin 引擎，功能不受影响。
 
 仓库自带 GitHub Actions 工作流（`.github/workflows/build.yml`），push 到 main 自动跑引擎测试 + 构建 APK，并以 artifact 形式提供下载。若要签名发布：
 1. 生成签名用的 keystore（如 `keytool -genkeypair -v -keystore cfst-release.jks -alias cfst -keyalg RSA -keysize 2048 -validity 10000`）
