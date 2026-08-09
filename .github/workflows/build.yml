@@ -23,8 +23,7 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         with:
-          api-level: 36
-          build-tools-version: 36.0.0
+          packages: platforms;android-36 build-tools;36.0.0
 
       - name: Engine tests
         working-directory: engine
@@ -41,10 +40,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > ../cfst-release.jks
+            echo "$KEYSTORE_BASE64" | base64 -d > ./cfst-release.jks
             printf 'storeFile=../cfst-release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > signing.properties
           else
-            keytool -genkeypair -v -keystore ../cfst-release.jks -storepass cfst-cfst-cfst -alias cfst -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CloudflareSpeedGUI, OU=Dev, O=cfst, L=City, ST=State, C=CN"
+            keytool -genkeypair -v -keystore ./cfst-release.jks -storepass cfst-cfst-cfst -alias cfst -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CloudflareSpeedGUI, OU=Dev, O=cfst, L=City, ST=State, C=CN"
             printf 'storeFile=../cfst-release.jks\nstorePassword=cfst-cfst-cfst\nkeyAlias=cfst\nkeyPassword=cfst-cfst-cfst\n' > signing.properties
           fi
 
