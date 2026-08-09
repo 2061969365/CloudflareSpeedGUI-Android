@@ -64,6 +64,8 @@ class AppContainer(private val context: Context) {
         regionResolver = { ip, port -> resolveRegion(ip, port) },
     )
 
+    val scanController: ScanController = buildScanController()
+
     fun assetIpLines(source: IpSource): List<String> {
         if (source == IpSource.CUSTOM) return emptyList()
         val fileName = if (source == IpSource.OFFICIAL) "ip/official.txt" else "ip/cmip.txt"

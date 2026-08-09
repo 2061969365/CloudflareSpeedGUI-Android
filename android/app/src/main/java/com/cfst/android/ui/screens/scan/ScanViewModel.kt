@@ -1,6 +1,9 @@
 package com.cfst.android.ui.screens.scan
 
 import android.app.Application
+import android.content.Context
+import android.content.Intent
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cfst.android.CfApp
@@ -13,6 +16,7 @@ import com.cfst.android.engine.model.ResultStats
 import com.cfst.android.engine.model.ScanEvent
 import com.cfst.android.engine.model.ScanRequest
 import com.cfst.android.engine.model.ScanResult
+import com.cfst.android.service.ScanService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,7 +54,7 @@ data class ScanUiState(
 class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as CfApp).container
-    private val controller: ScanController = container.buildScanController()
+    private val controller: ScanController = container.scanController
 
     private val _uiState = MutableStateFlow(ScanUiState())
     val uiState: StateFlow<ScanUiState> = _uiState.asStateFlow()
@@ -85,6 +89,11 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     fastestMs = null,
                 )
             }
+            val app = getApplication<Application>()
+            ContextCompat.startForegroundService(
+                app,
+                Intent(app, ScanService::class.java).setAction(ScanService.ACTION_START),
+            )
             controller.start(request)
         }
     }
