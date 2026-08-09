@@ -108,11 +108,11 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         val sorted = when (filter.sortMode) {
             ResultSortMode.LATENCY_ASC ->
                 base.sortedWith(
-                    compareBy<ScanResult, Float>(nullsLast()) { it.avgMs }.thenBy { it.ip },
+                    compareBy<ScanResult> { it.avgMs ?: Float.MAX_VALUE }.thenBy { it.ip },
                 )
             ResultSortMode.SPEED_DESC ->
                 base.sortedWith(
-                    compareByDescending<ScanResult> { it.speed }.thenBy { it.ip },
+                    compareByDescending<ScanResult> { it.speed ?: -1f }.thenBy { it.ip },
                 )
             ResultSortMode.IP_ASC -> base.sortedWith(compareBy<ScanResult> { it.ip })
         }
