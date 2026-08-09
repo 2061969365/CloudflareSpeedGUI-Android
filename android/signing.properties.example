@@ -1,0 +1,5 @@
+# 复制为 signing.properties 并按需修改（signing.properties 不要提交到仓库）
+storeFile=../cfst-release.jks
+storePassword=CHANGE_ME
+keyAlias=cfst
+keyPassword=CHANGE_ME

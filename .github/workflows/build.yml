@@ -30,13 +30,26 @@ jobs:
         working-directory: engine
         run: ./gradlew test
 
-      - name: Android build
+      - name: Ensure signing key
         working-directory: android
+        shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > ../cfst-release.jks
+            printf 'storeFile=../cfst-release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > signing.properties
+          else
+            keytool -genkeypair -v -keystore ../cfst-release.jks -storepass cfst-cfst-cfst -alias cfst -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CloudflareSpeedGUI, OU=Dev, O=cfst, L=City, ST=State, C=CN"
+            printf 'storeFile=../cfst-release.jks\nstorePassword=cfst-cfst-cfst\nkeyAlias=cfst\nkeyPassword=cfst-cfst-cfst\n' > signing.properties
+          fi
+
+      - name: Android build
+        working-directory: android
         run: ./gradlew :app:assembleRelease
 
       - uses: actions/upload-artifact@v4

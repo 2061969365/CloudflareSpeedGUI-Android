@@ -11,3 +11,8 @@ build/
 .superpowers/
 local.properties
 *.log
+
+# Signing
+signing.properties
+*.jks
+*.keystore

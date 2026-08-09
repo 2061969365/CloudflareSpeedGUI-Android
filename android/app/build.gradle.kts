@@ -1,8 +1,16 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+val signingPropsFile = rootProject.file("signing.properties")
+val signingProps = if (signingPropsFile.exists()) {
+    Properties().apply { FileInputStream(signingPropsFile).use { load(it) } }
+} else null
 
 android {
     namespace = "com.cfst.android"
@@ -18,9 +26,21 @@ android {
 
     sourceSets["main"].kotlin.srcDirs("../../engine/src/main/kotlin")
 
+    signingConfigs {
+        create("release") {
+            signingProps?.let { p ->
+                storeFile = file(p.getProperty("storeFile"))
+                storePassword = p.getProperty("storePassword")
+                keyAlias = p.getProperty("keyAlias")
+                keyPassword = p.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")  // 无 signing.properties 时 storeFile 为 null → 不签名
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
