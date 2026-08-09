@@ -49,4 +49,9 @@ object ColoRegionMapper {
         val key = colo.uppercase(Locale.US)
         return REGIONS[key] ?: key
     }
+
+    fun shortRegionName(colo: String): String {
+        if (colo.isEmpty()) return "未知"
+        return colo.uppercase(Locale.US).take(2)
+    }
 }
