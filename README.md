@@ -26,6 +26,21 @@ cd android && ./gradlew :app:assembleRelease
 ```
 APK 输出路径：`android/app/build/outputs/apk/release/app-release.apk`
 
+## 构建说明 / Building
+
+`libcfst.so`（CloudflareSpeedTest 的 Android 原生库）已编译好并提交在仓库中，本地构建无需 Go 工具链。如需重新编译，需先安装 Go 1.21+：
+
+```bash
+bash scripts/build-cfst-android.sh          # 默认编译 v2.3.5
+bash scripts/build-cfst-android.sh v2.3.5   # 指定 tag
+```
+
+脚本会把产物分别写到：
+- `android/app/src/main/jniLibs/arm64-v8a/libcfst.so`
+- `android/app/src/main/jniLibs/armeabi-v7a/libcfst.so`
+
+CI（`.github/workflows/build.yml` 的 `build-cfst` job）会在每次 push 到 main 时自动编译并将生成的 `.so` 提交回仓库；首次运行后仓库即自带这两个 ABI 的二进制，后续构建 APK 时直接复用。
+
 仓库自带 GitHub Actions 工作流（`.github/workflows/build.yml`），push 到 main 自动跑引擎测试 + 构建 APK，并以 artifact 形式提供下载。若要签名发布：
 1. 生成签名用的 keystore（如 `keytool -genkeypair -v -keystore cfst-release.jks -alias cfst -keyalg RSA -keysize 2048 -validity 10000`）
 2. 复制 `android/signing.properties.example` 为 `android/signing.properties` 并填入 keystore 路径与密码
