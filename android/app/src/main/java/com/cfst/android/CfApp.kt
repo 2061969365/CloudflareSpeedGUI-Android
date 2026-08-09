@@ -10,6 +10,7 @@ import androidx.room.Room
 import com.cfst.android.data.ConfigRepository
 import com.cfst.android.data.HistoryDb
 import com.cfst.android.data.HistoryRepository
+import com.cfst.android.engine.KotlinEngine
 import com.cfst.android.engine.LatencyProbe
 import com.cfst.android.engine.ScanController
 import com.cfst.android.engine.SpeedProbe
@@ -55,12 +56,14 @@ class AppContainer(private val context: Context) {
         .build()
 
     fun buildScanController(): ScanController = ScanController(
-        latencyProbe = { ip, port, pingCount, timeoutMs ->
-            LatencyProbe.probe(ip, port, pingCount, timeoutMs)
-        },
-        speedProbe = { ip, port, url, durationSec, speedLimit ->
-            SpeedProbe.measure(ip, port, url, durationSec, speedLimit)
-        },
+        engine = KotlinEngine(
+            latencyProbe = { ip, port, pingCount, timeoutMs ->
+                LatencyProbe.probe(ip, port, pingCount, timeoutMs)
+            },
+            speedProbe = { ip, port, url, durationSec, speedLimit ->
+                SpeedProbe.measure(ip, port, url, durationSec, speedLimit)
+            },
+        ),
         regionResolver = { ip, port -> resolveRegion(ip, port) },
     )
 

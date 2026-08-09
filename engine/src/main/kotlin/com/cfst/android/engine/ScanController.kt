@@ -1,6 +1,6 @@
 package com.cfst.android.engine
 
-import com.cfst.android.engine.model.LatencyStats
+import com.cfst.android.engine.cfst.CfstBinary
 import com.cfst.android.engine.model.ScanEvent
 import com.cfst.android.engine.model.ScanRequest
 import com.cfst.android.engine.model.ScanResult
@@ -16,11 +16,11 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 
 class ScanController(
-    private val latencyProbe: suspend (String, Int, Int, Int) -> LatencyStats,
-    private val speedProbe: suspend (String, Int, String, Int, Float) -> Float?,
+    private val engine: ScanEngine,
     private val regionResolver: suspend (String, Int) -> String?,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
@@ -93,26 +93,30 @@ class ScanController(
     }
 
     private suspend fun runLatencyPhase(req: ScanRequest, ips: List<String>): List<ScanResult> {
-        val completed = AtomicInteger(0)
-        val elapsedMsSamples = mutableListOf<Long>()
         val totalTasks = req.ports.size * ips.size
+        val phaseStart = System.nanoTime()
+        var completed = 0
         val latencyLimit = req.latencyLimit
 
         if (req.multiPortBest) {
-            val byIp = java.util.Collections.synchronizedMap(mutableMapOf<String, ScanResult>())
+            val byIp = Collections.synchronizedMap(mutableMapOf<String, ScanResult>())
             for (port in req.ports) {
-                coroutineScope {
-                    for (ip in ips) {
-                        launch(dispatcher.limitedParallelism(req.pingConcurrency)) {
-                            val result = probeOne(req, ip, port, completed, totalTasks, elapsedMsSamples, latencyLimit)
-                            if (result != null) {
-                                synchronized(byIp) {
-                                    val existing = byIp[ip]
-                                    if (existing == null || (result.avgMs ?: Float.MAX_VALUE) < (existing.avgMs ?: Float.MAX_VALUE)) {
-                                        byIp[ip] = result
-                                    }
-                                }
-                            }
+                val results = engine.latencyScan(
+                    ips = ips,
+                    port = port,
+                    probeCount = req.probeCount,
+                    pingCount = req.pingCount,
+                    latencyLimit = latencyLimit,
+                    concurrency = req.pingConcurrency,
+                ) { done, total ->
+                    reportProgress(phaseStart, completed + done, totalTasks, "延迟扫描")
+                }
+                completed += ips.size
+                synchronized(byIp) {
+                    for (r in results) {
+                        val existing = byIp[r.ip]
+                        if (existing == null || (r.avgMs ?: Float.MAX_VALUE) < (existing.avgMs ?: Float.MAX_VALUE)) {
+                            byIp[r.ip] = r
                         }
                     }
                 }
@@ -120,65 +124,33 @@ class ScanController(
             return byIp.values.toList()
         }
 
-        val all = java.util.Collections.synchronizedList(mutableListOf<ScanResult>())
-        coroutineScope {
-            for (ip in ips) {
-                for (port in req.ports) {
-                    launch(dispatcher) {
-                        val result = probeOne(req, ip, port, completed, totalTasks, elapsedMsSamples, latencyLimit)
-                        if (result != null) {
-                            all.add(result)
-                        }
-                    }
-                }
+        val all = Collections.synchronizedList(mutableListOf<ScanResult>())
+        for (port in req.ports) {
+            val results = engine.latencyScan(
+                ips = ips,
+                port = port,
+                probeCount = req.probeCount,
+                pingCount = req.pingCount,
+                latencyLimit = latencyLimit,
+                concurrency = req.pingConcurrency,
+            ) { done, total ->
+                reportProgress(phaseStart, completed + done, totalTasks, "延迟扫描")
             }
+            completed += ips.size
+            all.addAll(results)
         }
         return all.toList()
     }
 
-    private suspend fun probeOne(
-        req: ScanRequest,
-        ip: String,
-        port: Int,
-        completed: AtomicInteger,
-        totalTasks: Int,
-        elapsedMsSamples: MutableList<Long>,
-        latencyLimit: Float,
-    ): ScanResult? {
-        currentCoroutineContext().ensureActive()
-        val start = System.nanoTime()
-        val stats: LatencyStats? = try {
-            latencyProbe(ip, port, req.pingCount, req.pingTimeoutMs)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            null
-        }
-        val elapsedMs = (System.nanoTime() - start) / 1_000_000
-        synchronized(elapsedMsSamples) { elapsedMsSamples.add(elapsedMs) }
-        val done = completed.incrementAndGet()
-        val avgElapsed = elapsedMsSamples.takeLast(20).average().toLong()
-        val etaMs = if (elapsedMsSamples.size >= 3) (totalTasks - done) * avgElapsed else null
-        val ms = stats?.avgMs
-        emit(
+    private fun reportProgress(startNs: Long, done: Int, total: Int, label: String) {
+        val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
+        val etaMs = if (done >= 3 && done > 0) elapsedMs * (total - done) / done else null
+        events.tryEmit(
             ScanEvent.Progress(
-                pct = done * 100 / totalTasks,
-                text = if (ms != null) "延迟扫描 $done/$totalTasks (${ms.toInt()} ms)" else "延迟扫描 $done/$totalTasks",
+                pct = done * 100 / total,
+                text = "$label $done/$total",
                 etaMs = etaMs,
             )
-        )
-        if (stats == null || stats.avgMs == null || stats.avgMs > latencyLimit) return null
-        return ScanResult(
-            ip = ip,
-            port = port,
-            avgMs = stats.avgMs,
-            minMs = stats.minMs,
-            maxMs = stats.maxMs,
-            lossPct = stats.lossPct,
-            speed = null,
-            regionCode = "",
-            regionName = "",
-            testedAt = System.currentTimeMillis(),
         )
     }
 
@@ -188,18 +160,13 @@ class ScanController(
                 .sortedBy { it.avgMs ?: Float.MAX_VALUE }
                 .take(req.speedCount)
         }
-        val resolved = java.util.Collections.synchronizedMap(mutableMapOf<String, ScanResult>())
+        val resolved = Collections.synchronizedMap(mutableMapOf<String, ScanResult>())
         coroutineScope {
             for (rec in survivors) {
                 launch(dispatcher.limitedParallelism(req.pingConcurrency)) {
                     currentCoroutineContext().ensureActive()
-                    val code = try {
-                        regionResolver(rec.ip, rec.port)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        null
-                    }
+                    val code = rec.regionCode.takeIf { it.isNotBlank() }
+                        ?: runCatching { regionResolver(rec.ip, rec.port) }.getOrNull()
                     if (code != null && regionCode(code) == regionCode(req.region)) {
                         resolved[rec.ip] = rec.copy(
                             regionCode = code,
@@ -215,54 +182,44 @@ class ScanController(
     }
 
     private suspend fun runSpeedPhase(req: ScanRequest, targets: List<ScanResult>): List<ScanResult> {
-        val url = req.downloadUrl.ifBlank { DEFAULT_SPEED_URL }
+        val url = req.downloadUrl.ifBlank { CfstBinary.DEFAULT_SPEED_URL }
         val groupTimeoutMs = req.downloadCount.toLong() * req.downloadTime * 1000L + 30_000L
         val grouped = targets.groupBy { it.port }.toList()
-        val result = java.util.Collections.synchronizedList(mutableListOf<ScanResult>())
+        val result = Collections.synchronizedList(mutableListOf<ScanResult>())
         val groupIndex = AtomicInteger(0)
 
         for ((port, group) in grouped) {
             val idx = groupIndex.incrementAndGet()
             emit(ScanEvent.Log("测速组 $idx/${grouped.size} 端口 $port (${group.size} 个 IP)"))
-            val speedMap = java.util.Collections.synchronizedMap(mutableMapOf<String, Float?>())
-            val completed = withTimeoutOrNull(groupTimeoutMs) {
-                coroutineScope {
-                    for (rec in group) {
-                        launch(dispatcher.limitedParallelism(req.speedConcurrency)) {
-                            currentCoroutineContext().ensureActive()
-                            val speed = try {
-                                speedProbe(rec.ip, rec.port, url, req.downloadTime, req.speedLimit)
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (_: Exception) {
-                                null
-                            }
-                            speedMap[rec.ip] = speed
-                            emit(
-                                ScanEvent.Progress(
-                                    pct = idx * 100 / grouped.size,
-                                    text = "测速中 group $idx/${grouped.size} (${formatSpeed(speed)})",
-                                    etaMs = null,
-                                )
-                            )
-                        }
-                    }
+            val sped = withTimeoutOrNull(groupTimeoutMs) {
+                engine.speedScan(
+                    ips = group.map { it.ip },
+                    port = port,
+                    url = url,
+                    downloadTime = req.downloadTime,
+                    downloadCount = req.downloadCount,
+                    speedLimit = req.speedLimit,
+                    concurrency = req.speedConcurrency,
+                ) { done, total ->
+                    events.tryEmit(
+                        ScanEvent.Progress(
+                            pct = idx * 100 / grouped.size,
+                            text = "测速中 group $idx/${grouped.size} ($done/$total)",
+                            etaMs = null,
+                        )
+                    )
                 }
-                true
             }
-            if (completed == null) {
+            if (sped == null) {
                 emit(ScanEvent.Log("测速组 $port 超时，跳过"))
             }
+            val speedByIp = (sped ?: emptyList()).associateBy({ it.ip }, { it.speed })
             for (rec in group) {
-                val speed = speedMap[rec.ip]
-                result.add(rec.copy(speed = speed))
+                result.add(rec.copy(speed = speedByIp[rec.ip]))
             }
         }
         return result.toList()
     }
-
-    private fun formatSpeed(speed: Float?): String =
-        if (speed == null) "失败" else "%.2f MB/s".format(speed)
 
     private suspend fun emit(event: ScanEvent) {
         events.emit(event)
@@ -270,8 +227,4 @@ class ScanController(
 
     private fun regionCode(value: String): String =
         value.trim().substringBefore(" (").trim()
-
-    companion object {
-        private val DEFAULT_SPEED_URL = "https://cf.xiu2.xyz/url"
-    }
 }

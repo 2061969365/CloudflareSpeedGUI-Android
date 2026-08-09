@@ -68,15 +68,18 @@ class ScanControllerTest {
     fun singlePortNormalFlow() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val controller = ScanController(
-            latencyProbe = { ip, _, _, _ ->
-                val avg = when (ip) {
-                    "1.1.1.1" -> 50f
-                    "1.1.1.2" -> 300f
-                    else -> 100f
-                }
-                LatencyStats(2, 2, 0f, avg, avg, avg)
-            },
-            speedProbe = { _, _, _, _, _ -> 12.5f },
+            engine = KotlinEngine(
+                latencyProbe = { ip, _, _, _ ->
+                    val avg = when (ip) {
+                        "1.1.1.1" -> 50f
+                        "1.1.1.2" -> 300f
+                        else -> 100f
+                    }
+                    LatencyStats(2, 2, 0f, avg, avg, avg)
+                },
+                speedProbe = { _, _, _, _, _ -> 12.5f },
+                dispatcher = dispatcher,
+            ),
             regionResolver = { _, _ -> null },
             dispatcher = dispatcher,
         )
@@ -99,8 +102,11 @@ class ScanControllerTest {
     fun speedEnabledFillsSpeed() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val controller = ScanController(
-            latencyProbe = { _, _, _, _ -> LatencyStats(2, 2, 0f, 50f, 50f, 50f) },
-            speedProbe = { _, _, _, _, _ -> 12.5f },
+            engine = KotlinEngine(
+                latencyProbe = { _, _, _, _ -> LatencyStats(2, 2, 0f, 50f, 50f, 50f) },
+                speedProbe = { _, _, _, _, _ -> 12.5f },
+                dispatcher = dispatcher,
+            ),
             regionResolver = { _, _ -> null },
             dispatcher = dispatcher,
         )
@@ -120,11 +126,14 @@ class ScanControllerTest {
     fun multiPortBestSerial() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val controller = ScanController(
-            latencyProbe = { _, port, _, _ ->
-                val avg = if (port == 8443) 150f else 50f
-                LatencyStats(2, 2, 0f, avg, avg, avg)
-            },
-            speedProbe = { _, _, _, _, _ -> 12.5f },
+            engine = KotlinEngine(
+                latencyProbe = { _, port, _, _ ->
+                    val avg = if (port == 8443) 150f else 50f
+                    LatencyStats(2, 2, 0f, avg, avg, avg)
+                },
+                speedProbe = { _, _, _, _, _ -> 12.5f },
+                dispatcher = dispatcher,
+            ),
             regionResolver = { _, _ -> null },
             dispatcher = dispatcher,
         )
@@ -146,11 +155,14 @@ class ScanControllerTest {
         val customLines = listOf("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4")
         val speedCalls = mutableListOf<String>()
         val controller = ScanController(
-            latencyProbe = { _, _, _, _ -> LatencyStats(2, 2, 0f, 50f, 50f, 50f) },
-            speedProbe = { ip, _, _, _, _ ->
-                speedCalls.add(ip)
-                12.5f
-            },
+            engine = KotlinEngine(
+                latencyProbe = { _, _, _, _ -> LatencyStats(2, 2, 0f, 50f, 50f, 50f) },
+                speedProbe = { ip, _, _, _, _ ->
+                    speedCalls.add(ip)
+                    12.5f
+                },
+                dispatcher = dispatcher,
+            ),
             regionResolver = { ip, _ -> if (ip.endsWith(".1") || ip.endsWith(".3")) "HKG" else "LAX" },
             dispatcher = dispatcher,
         )
@@ -169,11 +181,14 @@ class ScanControllerTest {
     fun cancelStopsEmitting() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val controller = ScanController(
-            latencyProbe = { _, _, _, _ ->
-                delay(Long.MAX_VALUE)
-                LatencyStats(2, 0, 100f, null, null, null)
-            },
-            speedProbe = { _, _, _, _, _ -> 12.5f },
+            engine = KotlinEngine(
+                latencyProbe = { _, _, _, _ ->
+                    delay(Long.MAX_VALUE)
+                    LatencyStats(2, 0, 100f, null, null, null)
+                },
+                speedProbe = { _, _, _, _, _ -> 12.5f },
+                dispatcher = dispatcher,
+            ),
             regionResolver = { _, _ -> null },
             dispatcher = dispatcher,
         )
@@ -193,15 +208,18 @@ class ScanControllerTest {
     fun watchdogSkipsStuckGroup() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val controller = ScanController(
-            latencyProbe = { _, _, _, _ -> LatencyStats(2, 2, 0f, 50f, 50f, 50f) },
-            speedProbe = { _, port, _, _, _ ->
-                if (port == 8443) {
-                    delay(Long.MAX_VALUE)
-                    5f
-                } else {
-                    20f
-                }
-            },
+            engine = KotlinEngine(
+                latencyProbe = { _, _, _, _ -> LatencyStats(2, 2, 0f, 50f, 50f, 50f) },
+                speedProbe = { _, port, _, _, _ ->
+                    if (port == 8443) {
+                        delay(Long.MAX_VALUE)
+                        5f
+                    } else {
+                        20f
+                    }
+                },
+                dispatcher = dispatcher,
+            ),
             regionResolver = { _, _ -> null },
             dispatcher = dispatcher,
         )
