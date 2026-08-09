@@ -113,9 +113,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         item {
             NumberSetting(
                 title = "Ping 并发数",
-                hint = "1-64",
+                hint = "1-1500",
                 value = state.pingConcurrency,
-                default = 8,
+                default = 200,
                 onChange = vm::setPingConcurrency,
             )
         }

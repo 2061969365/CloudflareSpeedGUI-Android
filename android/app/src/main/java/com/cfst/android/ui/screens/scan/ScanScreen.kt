@@ -154,7 +154,7 @@ fun ScanScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        OutlinedTextField(
+OutlinedTextField(
             value = state.maxIps.toString(),
             onValueChange = { raw ->
                 vm.setMaxIps(raw.filter { it.isDigit() }.toIntOrNull() ?: 0)
@@ -164,6 +164,32 @@ fun ScanScreen(modifier: Modifier = Modifier) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth(),
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            OutlinedTextField(
+                value = state.pingConcurrency.toString(),
+                onValueChange = { raw ->
+                    vm.setPingConcurrency((raw.filter { it.isDigit() }.toIntOrNull()?.coerceIn(1, 1500)) ?: 1)
+                },
+                label = { Text("延迟并发 (1-1500)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = state.speedConcurrency.toString(),
+                onValueChange = { raw ->
+                    vm.setSpeedConcurrency(raw.filter { it.isDigit() }.toIntOrNull()?.coerceIn(1, 32) ?: 1)
+                },
+                label = { Text("测速并发 (1-32)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),

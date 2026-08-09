@@ -35,6 +35,8 @@ data class ScanUiState(
     val source: IpSource = IpSource.OFFICIAL,
     val ports: List<Int> = listOf(443),
     val maxIps: Int = 500,
+    val pingConcurrency: Int = 200,
+    val speedConcurrency: Int = 5,
     val fullScan: Boolean = false,
     val multiPortBest: Boolean = false,
     val speedEnabled: Boolean = false,
@@ -163,8 +165,24 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(maxIps = value) }
     }
 
+    fun setPingConcurrency(value: Int) {
+        _uiState.update { it.copy(pingConcurrency = value) }
+        persistInt("pingConcurrency", value)
+    }
+
+    fun setSpeedConcurrency(value: Int) {
+        _uiState.update { it.copy(speedConcurrency = value) }
+        persistInt("speedConcurrency", value)
+    }
+
     fun setCustomLines(lines: List<String>) {
         _uiState.update { it.copy(customLines = lines) }
+    }
+
+    private fun persistInt(key: String, value: Int) {
+        viewModelScope.launch {
+            runCatching { container.configRepository.set(key, value) }
+        }
     }
 
     private suspend fun buildScanRequest(): ScanRequest {
@@ -184,7 +202,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             speedEnabled = state.speedEnabled,
             region = state.region,
             speedCount = intOf(persisted, "speedCount", 50),
-            probeCount = state.maxIps,
+            probeCount = intOf(persisted, "probeCount", 500),
             fullProbeCount = intOf(persisted, "fullScanProbeCount", 5000),
             latencyLimit = floatOf(persisted, "latencyLimit", 200f),
             downloadTime = intOf(persisted, "downloadTime", 10),
@@ -194,7 +212,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 ?: "https://speed.hatexianyu.ccwu.cc/?bytes=209715200",
             pingCount = intOf(persisted, "pingCount", 2),
             pingTimeoutMs = 2000,
-            pingConcurrency = intOf(persisted, "pingConcurrency", 8),
+            pingConcurrency = intOf(persisted, "pingConcurrency", 200),
             speedConcurrency = intOf(persisted, "speedConcurrency", 5),
         )
     }
@@ -209,7 +227,12 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         when (event) {
             is ScanEvent.PhaseChanged -> _uiState.update { it.copy(phase = event.phase) }
             is ScanEvent.Progress -> _uiState.update {
-                it.copy(progress = event.pct.coerceIn(0, 100), phase = event.text, etaMs = event.etaMs)
+                it.copy(
+                    progress = event.pct.coerceIn(0, 100),
+                    phase = event.text,
+                    etaMs = event.etaMs,
+                    totalScanned = if (event.total > 0) event.done else it.totalScanned,
+                )
             }
             is ScanEvent.Log -> {
                 trackGenerated(event.line)

@@ -19,7 +19,7 @@ data class SettingsUiState(
     val probeCount: Int = 500,
     val fullScanProbeCount: Int = 5000,
     val downloadUrl: String = "",
-    val pingConcurrency: Int = 8,
+    val pingConcurrency: Int = 200,
     val speedConcurrency: Int = 5,
     val historyRetentionDays: Int = 30,
 )
@@ -69,7 +69,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setPingConcurrency(value: Int) {
-        updateInt("pingConcurrency", value, 1, 64) { s, v -> s.copy(pingConcurrency = v) }
+        updateInt("pingConcurrency", value, 1, 1500) { s, v -> s.copy(pingConcurrency = v) }
     }
 
     fun setSpeedConcurrency(value: Int) {
@@ -109,7 +109,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         probeCount = intOf(cfg, "probeCount", 500),
         fullScanProbeCount = intOf(cfg, "fullScanProbeCount", 5000),
         downloadUrl = cfg["downloadUrl"] as? String ?: "",
-        pingConcurrency = intOf(cfg, "pingConcurrency", 8),
+        pingConcurrency = intOf(cfg, "pingConcurrency", 200),
         speedConcurrency = intOf(cfg, "speedConcurrency", 5),
         historyRetentionDays = intOf(cfg, "historyRetentionDays", 30),
     )
