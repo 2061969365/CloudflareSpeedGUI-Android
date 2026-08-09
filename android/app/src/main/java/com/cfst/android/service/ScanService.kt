@@ -58,7 +58,10 @@ class ScanService : Service() {
         }
         serviceScope.launch {
             delay(5_000)
-            if (!receivedEvent) stopScan()
+            if (!receivedEvent) {
+                (application as CfApp).container.scanController.cancel()
+                stopScan()
+            }
         }
     }
 
@@ -73,9 +76,13 @@ class ScanService : Service() {
             is ScanEvent.Log -> notifier.notifyProgress(0, event.line)
             is ScanEvent.Error -> {
                 notifier.notifyProgress(0, "扫描失败：${event.message}")
+                (application as CfApp).container.scanController.cancel()
                 stopScan()
             }
-            is ScanEvent.Done -> stopScan()
+            is ScanEvent.Done -> {
+                (application as CfApp).container.scanController.cancel()
+                stopScan()
+            }
             is ScanEvent.ResultReady -> { /* 结果展示由 ViewModel 负责 */ }
         }
     }

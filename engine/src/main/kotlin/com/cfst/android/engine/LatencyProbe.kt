@@ -10,6 +10,16 @@ object LatencyProbe {
 
     suspend fun probe(ip: String, port: Int, pingCount: Int, timeoutMs: Int): LatencyStats =
         withContext(Dispatchers.IO) {
+            if (pingCount <= 0) {
+                return@withContext LatencyStats(
+                    sent = 0,
+                    received = 0,
+                    lossPct = 0f,
+                    avgMs = null,
+                    minMs = null,
+                    maxMs = null,
+                )
+            }
             val rtts = mutableListOf<Float>()
             repeat(pingCount) {
                 val socket = Socket()

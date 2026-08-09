@@ -22,30 +22,49 @@ class IpNetwork(
     }
 
     fun expandAll(): Sequence<String> = when (version) {
-        4 -> (1..usable).asSequence().map { toV4String(network.add(BigInteger.valueOf(it))) }
-        6 -> sequenceOf(original)
+        4 -> expandOffsets().map { hostAt(it) }
+        6 -> expandV6All()
         else -> emptySequence()
     }
 
+    private fun expandV6All(): Sequence<String> = when {
+        prefixLen >= 128 -> sequenceOf(original)
+        prefixLen == 127 -> sequenceOf(hostAt(0), hostAt(1))
+        else -> sequenceOf(original)
+    }
+
+    fun hostAt(offset: Long): String = when (version) {
+        4 -> toV4String(network.add(BigInteger.valueOf(offset)))
+        6 -> toV6String(network.add(BigInteger.valueOf(offset)))
+        else -> original
+    }
+
+    private fun expandOffsets(): Sequence<Long> = when {
+        prefixLen >= 32 -> sequenceOf(0L)
+        prefixLen == 31 -> sequenceOf(0L, 1L)
+        else -> (1..usable).asSequence()
+    }
+
     private fun sampleHostsV4(n: Int): List<String> {
-        if (n <= 0 || usable <= 0) return emptyList()
+        if (n <= 0) return emptyList()
+        if (usable <= 0) return emptyList()
+        if (usable == 1L) return listOf(hostAt(0))
         val want = minOf(n.toLong(), usable)
-        val offsets = if (want == usable) {
-            (1L..usable).toList()
-        } else {
-            val seen = HashSet<Long>()
-            val result = ArrayList<Long>(want.toInt())
-            while (result.size < want) {
-                val r = ThreadLocalRandom.current().nextLong(1L, usable + 1)
-                if (seen.add(r)) result.add(r)
-            }
-            result
+        if (want == usable) {
+            return (1..usable).map { hostAt(it) }
         }
-        return offsets.map { toV4String(network.add(BigInteger.valueOf(it))) }
+        val seen = HashSet<Long>()
+        val result = ArrayList<String>(want.toInt())
+        while (result.size < want) {
+            val r = ThreadLocalRandom.current().nextLong(1L, usable + 1)
+            if (seen.add(r)) result.add(hostAt(r))
+        }
+        return result
     }
 
     private fun sampleHostsV6(n: Int): List<String> {
         if (n <= 0 || usable <= 0) return emptyList()
+        if (n >= 1 && usable == 1L) return listOf(original)
         val want = minOf(n.toLong(), usable)
         val seen = HashSet<BigInteger>()
         val result = ArrayList<BigInteger>(want.toInt())
@@ -96,7 +115,10 @@ object IpParser {
         val mask = if (prefix == 0) 0L else ((-1L) shl (32 - prefix)) and 0xFFFFFFFFL
         val network = value and mask
         val total = 1L shl (32 - prefix)
-        val usable = (total - 2).coerceAtLeast(0L)
+        val usable = when {
+            prefix >= 31 -> 1L
+            else -> (total - 2).coerceAtLeast(0L)
+        }
         return IpNetwork(
             original = addr + "/" + prefix,
             version = 4,
@@ -122,7 +144,10 @@ object IpParser {
         val mask = upper.xor(lower)
         val network = address.and(mask)
         val total = BigInteger.ONE.shiftLeft(128 - prefix)
-        val usable = total.subtract(BigInteger.TWO).max(BigInteger.ZERO)
+        val usable = when {
+            prefix >= 127 -> BigInteger.ONE
+            else -> total.subtract(BigInteger.TWO).max(BigInteger.ZERO)
+        }
         return IpNetwork(
             original = addr + "/" + prefix,
             version = 6,

@@ -71,7 +71,9 @@ class AppContainer(private val context: Context) {
         darkTheme.value = value
     }
 
-    private val db = Room.databaseBuilder(appContext, HistoryDb::class.java, "history.db").build()
+    private val db = Room.databaseBuilder(appContext, HistoryDb::class.java, "history.db")
+        .fallbackToDestructiveMigration()
+        .build()
     val historyRepository = HistoryRepository(db.historyDao())
 
     private val okHttpClient = OkHttpClient.Builder()

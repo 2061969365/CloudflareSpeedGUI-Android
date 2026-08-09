@@ -8,6 +8,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
@@ -33,7 +34,10 @@ class ScanController(
         previous?.cancel()
         val newScope = CoroutineScope(SupervisorJob() + dispatcher)
         scope = newScope
-        newScope.launch { run(req) }
+        newScope.launch {
+            previous?.coroutineContext?.get(Job)?.join()
+            run(req)
+        }
     }
 
     fun cancel() {
@@ -68,7 +72,8 @@ class ScanController(
                 emit(ScanEvent.Log("选择下载测速目标 (地区=${req.region}, 数量=${req.speedCount})"))
                 val targets = selectSpeedTargets(req, survivors)
                 if (targets.isEmpty()) {
-                    emptyList()
+                    events.tryEmit(ScanEvent.Log("地区解析失败，回退选择最快存活 IP"))
+                    survivors.sortedBy { it.avgMs ?: Float.MAX_VALUE }.take(req.speedCount)
                 } else {
                     emit(ScanEvent.PhaseChanged("下载测速"))
                     runSpeedPhase(req, targets)
@@ -82,9 +87,9 @@ class ScanController(
             emit(ScanEvent.PhaseChanged("完成"))
             emit(ScanEvent.Done)
         } catch (e: CancellationException) {
-            emit(ScanEvent.Log("已取消"))
-            emit(ScanEvent.Error("已取消"))
-            emit(ScanEvent.Done)
+            events.tryEmit(ScanEvent.Log("已取消"))
+            events.tryEmit(ScanEvent.Error("已取消"))
+            events.tryEmit(ScanEvent.Done)
         } catch (e: Exception) {
             emit(ScanEvent.Log("错误: ${e.message}"))
             emit(ScanEvent.Error(e.message ?: "未知错误"))
@@ -142,7 +147,9 @@ class ScanController(
         return all.toList()
     }
 
+    @Volatile
     private var throttledAtNs = 0L
+    @Volatile
     private var lastEmittedPct = -1
 
     private fun reportProgress(startNs: Long, done: Int, total: Int, label: String) {
@@ -173,9 +180,10 @@ class ScanController(
                 .take(req.speedCount)
         }
         val resolved = Collections.synchronizedMap(mutableMapOf<String, ScanResult>())
+        val limited = dispatcher.limitedParallelism(maxOf(1, req.pingConcurrency))
         coroutineScope {
             for (rec in survivors) {
-                launch(dispatcher.limitedParallelism(req.pingConcurrency)) {
+                launch(limited) {
                     currentCoroutineContext().ensureActive()
                     val code = rec.regionCode.takeIf { it.isNotBlank() }
                         ?: runCatching { regionResolver(rec.ip, rec.port) }.getOrNull()

@@ -41,7 +41,7 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
         "fullScanProbeCount" to Entry(intPreferencesKey("fullScanProbeCount"), 5000),
         "historyRetentionDays" to Entry(intPreferencesKey("historyRetentionDays"), 30),
         "speedCount" to Entry(intPreferencesKey("speedCount"), 50),
-        "pingConcurrency" to Entry(intPreferencesKey("pingConcurrency"), 8),
+        "pingConcurrency" to Entry(intPreferencesKey("pingConcurrency"), 200),
         "speedConcurrency" to Entry(intPreferencesKey("speedConcurrency"), 5),
     )
 
@@ -140,7 +140,7 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     private fun toPortsList(raw: String): List<Int> =
-        if (raw.isBlank()) emptyList() else raw.split(',').map { it.trim().toInt() }
+        if (raw.isBlank()) emptyList() else raw.split(',').mapNotNull { it.trim().toIntOrNull() }
 
     private companion object {
         const val LAST_PORTS_KEY = "lastPorts"

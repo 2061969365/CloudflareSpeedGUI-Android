@@ -48,7 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.cfst.android.data.HistoryEntry
+import com.cfst.android.data.HistorySummary
 import com.cfst.android.engine.model.ScanResult
 import com.cfst.android.ui.components.CopyIcon
 import java.text.SimpleDateFormat
@@ -60,7 +60,7 @@ private val TIME_FORMAT = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
 @Composable
 fun HistoryScreen(modifier: Modifier = Modifier) {
     val vm: HistoryViewModel = viewModel()
-    val entries by vm.all.collectAsState()
+    val entries by vm.summaries.collectAsState()
     val detailMap by vm.detailMap.collectAsState()
     val historySelection by vm.historySelection.collectAsState()
     val isRefreshing by vm.isRefreshing.collectAsState()
@@ -209,7 +209,7 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
 
 @Composable
 private fun HistoryCard(
-    entry: HistoryEntry,
+    entry: HistorySummary,
     expanded: Boolean,
     records: List<ScanResult>?,
     selectedKeys: Set<String>,
@@ -410,7 +410,7 @@ private fun HistoryDetail(
 
 private fun rowKeyOf(result: ScanResult): String = "${result.ip}:${result.port}"
 
-private fun entrySummary(entry: HistoryEntry): String {
+private fun entrySummary(entry: HistorySummary): String {
     val base = "IP ${entry.ipCount} / 结果 ${entry.resultCount}"
     return entry.fastestMs?.let { "$base    最快 $it ms" } ?: base
 }

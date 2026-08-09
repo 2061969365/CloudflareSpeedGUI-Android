@@ -28,6 +28,7 @@ class ConfigRepositoryTest {
         "lastPorts" to listOf(443),
         "multiPortEnabled" to false,
         "fullScanEnabled" to false,
+        "darkTheme" to false,
         "pingCount" to 2,
         "downloadCount" to 50,
         "downloadTime" to 10,
@@ -39,7 +40,7 @@ class ConfigRepositoryTest {
         "historyRetentionDays" to 30,
         "speedRegion" to "全部",
         "speedCount" to 50,
-        "pingConcurrency" to 8,
+        "pingConcurrency" to 200,
         "speedConcurrency" to 5,
     )
 
@@ -47,7 +48,7 @@ class ConfigRepositoryTest {
     fun defaults_flow_emits_all_defaults() = runTest {
         val repo = ConfigRepository(createDataStore())
         val config = repo.flow.first()
-        assertEquals(18, config.size)
+        assertEquals(19, config.size)
         assertEquals(defaults(), config)
     }
 

@@ -62,4 +62,14 @@ class LatencyProbeTest {
             assertNull(stats.avgMs)
         }
     }
+
+    @Test
+    fun zero_ping_count_returns_no_loss_nan() = runBlocking {
+        val stats = LatencyProbe.probe("127.0.0.1", 80, pingCount = 0, timeoutMs = 50)
+        assertEquals(0, stats.sent)
+        assertEquals(0, stats.received)
+        assertEquals(0f, stats.lossPct, 0f)
+        assertNull(stats.avgMs)
+        assertTrue(stats.lossPct.isNaN().not())
+    }
 }

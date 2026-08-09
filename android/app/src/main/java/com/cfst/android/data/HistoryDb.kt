@@ -23,11 +23,23 @@ data class HistoryEntry(
 @Dao
 interface HistoryDao {
     @Insert suspend fun insert(entry: HistoryEntry): Long
+    @Query("SELECT id, startedAt, ipCount, resultCount, fastestMs, regionsSummary FROM history ORDER BY startedAt DESC")
+    fun getAllSummaries(): Flow<List<HistorySummary>>
+    @Query("SELECT recordsCsv FROM history WHERE id = :id") suspend fun recordsCsv(id: Long): String?
     @Query("SELECT * FROM history ORDER BY startedAt DESC") fun getAll(): Flow<List<HistoryEntry>>
     @Query("DELETE FROM history WHERE id = :id") suspend fun deleteById(id: Long)
     @Query("DELETE FROM history WHERE startedAt < :ts") suspend fun deleteOlderThan(ts: Long)
     @Query("DELETE FROM history") suspend fun clearAll()
 }
+
+data class HistorySummary(
+    val id: Long,
+    val startedAt: Long,
+    val ipCount: Int,
+    val resultCount: Int,
+    val fastestMs: Long?,
+    val regionsSummary: String,
+)
 
 @Database(entities = [HistoryEntry::class], version = 1, exportSchema = false)
 abstract class HistoryDb : RoomDatabase() {

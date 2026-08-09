@@ -28,12 +28,22 @@ object IpGenerator {
         if (fullScan) {
             val seen = linkedSetOf<String>()
             seen += bareIps
+            val MAX_FULLSCAN_TOTAL = 2_000_000
             networks.forEachIndexed { i, (line, net) ->
-                if (net.version == 4) net.expandAll().forEach { seen += it } else seen += line
+                if (seen.size < MAX_FULLSCAN_TOTAL) {
+                    if (net.version == 4) {
+                        net.expandAll().forEach {
+                            if (seen.size >= MAX_FULLSCAN_TOTAL) return@forEachIndexed
+                            seen += it
+                        }
+                    } else {
+                        seen += line
+                    }
+                }
                 report(progress, total, i + 1)
             }
             progress(100)
-            return seen.toList()
+            return seen.take(MAX_FULLSCAN_TOTAL)
         } else if (maxIps == 0) {
             networks.forEachIndexed { i, (_, net) ->
                 out += when {
@@ -59,10 +69,7 @@ object IpGenerator {
 
     private fun oneHostPer24(net: IpNetwork): List<String> {
         val subnets = 1 shl (24 - net.prefixLen)
-        return net.expandAll()
-            .filterIndexed { index, _ -> index % 256 == 0 }
-            .take(subnets)
-            .toList()
+        return (0 until subnets).map { k -> net.hostAt(k * 256L + 1L) }
     }
 
     private fun report(progress: (Int) -> Unit, total: Int, done: Int) {

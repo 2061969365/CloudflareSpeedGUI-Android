@@ -59,4 +59,17 @@ class IpGeneratorTest {
         assertFalse(ips.contains("999.1.1.1"))
         assertTrue(ips.isNotEmpty())
     }
+
+    @Test
+    fun slash32_line_treated_as_single_host() {
+        val ips = IpGenerator.generate(listOf("104.16.1.1/32"), 0, false, ::noop)
+        assertEquals(listOf("104.16.1.1"), ips)
+    }
+
+    @Test
+    fun fullScan_large_network_does_not_oom() {
+        val ips = IpGenerator.generate(listOf("0.0.0.0/0"), 0, true, ::noop)
+        assertTrue("full scan of /0 must be capped to a sane bound", ips.size in 1..2_000_000)
+        assertTrue(ips.isNotEmpty())
+    }
 }

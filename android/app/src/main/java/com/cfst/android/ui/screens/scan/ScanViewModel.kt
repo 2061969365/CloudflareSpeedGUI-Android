@@ -337,18 +337,22 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         val results = lastResults
         if (results.isEmpty()) return
         lastResults = emptyList()
-        val stats = ResultStats.compute(results)
-        val entry = HistoryEntry(
-            startedAt = scanStartedAt,
-            ipCount = generatedCount,
-            resultCount = results.size,
-            fastestMs = stats.fastestMs?.toLong(),
-            regionsSummary = results.groupBy { it.regionName }
-                .map { (region, list) -> "$region:${list.size}" }
-                .joinToString(";"),
-            recordsCsv = CsvCodec.encode(results),
-        )
+        val startedAt = scanStartedAt
+        val count = generatedCount
         viewModelScope.launch {
+            val entry = withContext(Dispatchers.IO) {
+                val stats = ResultStats.compute(results)
+                HistoryEntry(
+                    startedAt = startedAt,
+                    ipCount = count,
+                    resultCount = results.size,
+                    fastestMs = stats.fastestMs?.toLong(),
+                    regionsSummary = results.groupBy { it.regionName }
+                        .map { (region, list) -> "$region:${list.size}" }
+                        .joinToString(";"),
+                    recordsCsv = CsvCodec.encode(results),
+                )
+            }
             runCatching { container.historyRepository.add(entry) }
         }
     }

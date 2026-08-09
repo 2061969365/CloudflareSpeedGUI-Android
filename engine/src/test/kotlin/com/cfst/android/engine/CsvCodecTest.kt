@@ -68,4 +68,17 @@ class CsvCodecTest {
         assertTrue(csv.contains("\"a,b\"\"c\""))
         assertEquals(records, CsvCodec.parse(csv))
     }
+
+    @Test
+    fun high_precision_floats_round_trip_exactly() {
+        val records = listOf(sample().copy(avgMs = 12.345f, speed = 123.456789f, lossPct = 0.1234567f))
+        assertEquals(records, CsvCodec.parse(CsvCodec.encode(records)))
+    }
+
+    @Test
+    fun embedded_newline_in_region_name_survives_round_trip() {
+        val records = listOf(sample().copy(regionName = "line1\nline2"))
+        val csv = CsvCodec.encode(records)
+        assertEquals(records, CsvCodec.parse(csv))
+    }
 }

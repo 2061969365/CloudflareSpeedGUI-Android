@@ -5,7 +5,6 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /**
  * Lossless CSV codec for [ScanResult].
@@ -55,7 +54,7 @@ object CsvCodec {
     }
 
     fun parse(text: String): List<ScanResult> {
-        val lines = text.lines().filter { it.isNotBlank() }
+        val lines = csvLines(text).filter { it.isNotBlank() }
         if (lines.isEmpty()) return emptyList()
         return lines.drop(1).map { line ->
             val f = splitCsvLine(line)
@@ -75,7 +74,7 @@ object CsvCodec {
     }
 
     private fun formatNumber(v: Float?): String =
-        v?.let { String.format(Locale.ROOT, "%.2f", it) } ?: ""
+        v?.let { it.toString() } ?: ""
 
     private fun parseFloatOrNull(s: String): Float? =
         s.trim().takeIf { it.isNotEmpty() }?.toFloatOrNull()
@@ -120,5 +119,36 @@ object CsvCodec {
         }
         fields.add(sb.toString())
         return fields
+    }
+
+    private fun csvLines(text: String): List<String> {
+        val lines = mutableListOf<String>()
+        val sb = StringBuilder()
+        var inQuotes = false
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            when (c) {
+                '"' -> {
+                    sb.append(c)
+                    if (inQuotes && i + 1 < text.length && text[i + 1] == '"') {
+                        sb.append('"')
+                        i++
+                    } else {
+                        inQuotes = !inQuotes
+                    }
+                }
+                '\n' -> if (inQuotes) {
+                    sb.append(c)
+                } else {
+                    lines.add(sb.toString().trimEnd('\r'))
+                    sb.setLength(0)
+                }
+                else -> sb.append(c)
+            }
+            i++
+        }
+        if (sb.isNotEmpty()) lines.add(sb.toString().trimEnd('\r'))
+        return lines
     }
 }

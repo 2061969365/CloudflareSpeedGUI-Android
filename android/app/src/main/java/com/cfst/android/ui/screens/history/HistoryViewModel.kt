@@ -9,7 +9,7 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cfst.android.CfApp
-import com.cfst.android.data.HistoryEntry
+import com.cfst.android.data.HistorySummary
 import com.cfst.android.engine.CsvCodec
 import com.cfst.android.engine.model.ResultFormatter
 import com.cfst.android.engine.model.ScanResult
@@ -32,8 +32,8 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
     private val _refreshTick = MutableStateFlow(0)
 
-    val all: StateFlow<List<HistoryEntry>> =
-        combine(container.historyRepository.all, _refreshTick) { entries, _ -> entries }
+    val summaries: StateFlow<List<HistorySummary>> =
+        combine(container.historyRepository.summaries, _refreshTick) { entries, _ -> entries }
             .stateIn(
                 viewModelScope,
                 SharingStarted.WhileSubscribed(5_000),
@@ -68,9 +68,13 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     fun loadDetail(id: Long) {
         if (_detailMap.value.containsKey(id)) return
         viewModelScope.launch {
-            val entry = all.value.firstOrNull { it.id == id } ?: return@launch
             val records = withContext(Dispatchers.IO) {
-                runCatching { CsvCodec.parse(entry.recordsCsv) }.getOrDefault(emptyList())
+                val csv = container.historyRepository.recordsCsv(id)
+                if (csv.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    runCatching { CsvCodec.parse(csv) }.getOrDefault(emptyList())
+                }
             }
             _detailMap.update { it + (id to records) }
         }
@@ -139,9 +143,13 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
     fun copyHistoryBest(context: Context, id: Long) {
         viewModelScope.launch {
-            val entry = all.value.firstOrNull { it.id == id } ?: return@launch
+            val csv = withContext(Dispatchers.IO) { container.historyRepository.recordsCsv(id) }
+            if (csv.isNullOrBlank()) {
+                toast(context, "该记录暂无明细")
+                return@launch
+            }
             val records = withContext(Dispatchers.IO) {
-                runCatching { CsvCodec.parse(entry.recordsCsv) }.getOrDefault(emptyList())
+                runCatching { CsvCodec.parse(csv) }.getOrDefault(emptyList())
             }
             val best = records.minByOrNull { it.avgMs ?: Float.MAX_VALUE }
             if (best != null) {
@@ -153,7 +161,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun exportCsv(context: Context, uri: Uri) {
-        val entries = all.value
+        val entries = summaries.value
         if (entries.isEmpty()) {
             toast(context, "暂无数据")
             return
@@ -161,7 +169,12 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val records = withContext(Dispatchers.IO) {
                 entries.flatMap { entry ->
-                    runCatching { CsvCodec.parse(entry.recordsCsv) }.getOrDefault(emptyList())
+                    try {
+                        val csv = container.historyRepository.recordsCsv(entry.id) ?: ""
+                        CsvCodec.parse(csv)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
                 }
             }
             if (records.isEmpty()) {

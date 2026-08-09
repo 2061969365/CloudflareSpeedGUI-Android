@@ -34,9 +34,10 @@ class KotlinEngine(
         val completed = AtomicInteger(0)
         val total = ips.size
         val results = Collections.synchronizedList(mutableListOf<ScanResult>())
+        val limited = dispatcher.limitedParallelism(maxOf(1, concurrency))
         coroutineScope {
             for (ip in ips) {
-                launch(dispatcher.limitedParallelism(maxOf(1, concurrency))) {
+                launch(limited) {
                     currentCoroutineContext().ensureActive()
                     val stats = try {
                         latencyProbe(ip, port, pingCount, DEFAULT_PING_TIMEOUT_MS)
@@ -81,9 +82,10 @@ class KotlinEngine(
         val completed = AtomicInteger(0)
         val total = ips.size
         val speeds = Collections.synchronizedMap(mutableMapOf<String, Float?>())
+        val limited = dispatcher.limitedParallelism(maxOf(1, concurrency))
         coroutineScope {
             for (ip in ips) {
-                launch(dispatcher.limitedParallelism(maxOf(1, concurrency))) {
+                launch(limited) {
                     currentCoroutineContext().ensureActive()
                     val speed = try {
                         speedProbe(ip, port, url, downloadTime, speedLimit)

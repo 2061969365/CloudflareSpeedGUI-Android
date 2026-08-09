@@ -43,7 +43,6 @@ object SpeedProbe {
                 null
             } finally {
                 runCatching { client.connectionPool.evictAll() }
-                runCatching { client.dispatcher.executorService.shutdown() }
             }
         }
 }
