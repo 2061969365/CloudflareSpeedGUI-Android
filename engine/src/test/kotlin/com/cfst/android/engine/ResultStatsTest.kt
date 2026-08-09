@@ -25,20 +25,30 @@ class ResultStatsTest {
     )
 
     @Test
-    fun top3_regions_sorted_by_count_desc() {
+    fun top3_regions_sorted_by_lowest_latency() {
         val records = listOf(
-            scan(regionCode = "US"),
-            scan(regionCode = "US"),
-            scan(regionCode = "JP"),
-            scan(regionCode = "JP"),
-            scan(regionCode = "JP"),
-            scan(regionCode = "DE"),
-            scan(regionCode = "SG"),
-            scan(regionCode = "SG"),
+            scan(avgMs = 40f, regionCode = "US"),
+            scan(avgMs = 60f, regionCode = "US"),
+            scan(avgMs = 10f, regionCode = "JP"),
+            scan(avgMs = 20f, regionCode = "JP"),
+            scan(avgMs = 15f, regionCode = "JP"),
+            scan(avgMs = 8f, regionCode = "DE"),
+            scan(avgMs = 30f, regionCode = "SG"),
+            scan(avgMs = 50f, regionCode = "SG"),
         )
         val stats = ResultStats.compute(records)
         assertEquals(8, stats.total)
-        assertEquals(listOf("JP" to 3, "SG" to 2, "US" to 2), stats.topRegions)
+        assertEquals(listOf("DE" to 1, "JP" to 3, "SG" to 2), stats.topRegions)
+    }
+
+    @Test
+    fun blank_region_codes_are_excluded_from_topRegions() {
+        val records = listOf(
+            scan(avgMs = 5f, regionCode = ""),
+            scan(avgMs = 20f, regionCode = "CN"),
+        )
+        val stats = ResultStats.compute(records)
+        assertEquals(listOf("CN" to 1), stats.topRegions)
     }
 
     @Test

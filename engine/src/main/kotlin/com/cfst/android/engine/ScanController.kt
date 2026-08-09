@@ -142,14 +142,26 @@ class ScanController(
         return all.toList()
     }
 
+    private var throttledAtNs = 0L
+    private var lastEmittedPct = -1
+
     private fun reportProgress(startNs: Long, done: Int, total: Int, label: String) {
-        val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
+        if (done == 0) return
+        val now = System.nanoTime()
+        val pct = done * 100 / total
+        val mustEmit = done == total || pct != lastEmittedPct || now - throttledAtNs >= 200_000_000L
+        if (!mustEmit) return
+        throttledAtNs = now
+        lastEmittedPct = pct
+        val elapsedMs = (now - startNs) / 1_000_000
         val etaMs = if (done >= 3 && done > 0) elapsedMs * (total - done) / done else null
         events.tryEmit(
             ScanEvent.Progress(
-                pct = done * 100 / total,
+                pct = pct,
                 text = "$label $done/$total",
                 etaMs = etaMs,
+                done = done,
+                total = total,
             )
         )
     }
@@ -206,6 +218,8 @@ class ScanController(
                             pct = idx * 100 / grouped.size,
                             text = "测速中 group $idx/${grouped.size} ($done/$total)",
                             etaMs = null,
+                            done = done,
+                            total = total,
                         )
                     )
                 }
