@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,11 +52,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cfst.android.data.HistorySummary
 import com.cfst.android.engine.model.ScanResult
 import com.cfst.android.ui.components.CopyIcon
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val TIME_FORMAT = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
 @Composable
 fun HistoryScreen(modifier: Modifier = Modifier) {
@@ -141,11 +143,16 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                             records = detailMap[entry.id],
                             selectedKeys = historySelection[entry.id] ?: emptySet(),
                             onToggle = {
-                                expandedId = if (expandedId == entry.id) null else entry.id
                                 if (expandedId == entry.id) {
-                                    vm.loadDetail(entry.id)
-                                } else {
                                     vm.collapseDetail(entry.id)
+                                    expandedId = null
+                                } else {
+                                    val previous = expandedId
+                                    if (previous != null && previous != entry.id) {
+                                        vm.collapseDetail(previous)
+                                    }
+                                    expandedId = entry.id
+                                    vm.loadDetail(entry.id)
                                 }
                             },
                             onDelete = { pendingDeleteId = entry.id },
@@ -343,66 +350,73 @@ private fun HistoryDetail(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    records.forEach { result ->
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (rowKeyOf(result) in selectedKeys) {
-                        Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
-                    } else {
-                        Modifier
-                    },
-                )
-                .padding(vertical = 2.dp)
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = { onCopyRow(result) },
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(
-                checked = rowKeyOf(result) in selectedKeys,
-                onCheckedChange = { onToggleSelect(result) },
-            )
-            Text(
-                text = result.ip,
-                modifier = Modifier.width(100.dp),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = result.port.toString(),
-                modifier = Modifier.width(40.dp),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = formatLatency(result.avgMs),
-                modifier = Modifier.width(56.dp),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = formatSpeed(result.speed),
-                modifier = Modifier.width(64.dp),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = result.regionName.ifBlank { result.regionCode }.ifBlank { "-" },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            IconButton(
-                onClick = { onCopyRow(result) },
-                modifier = Modifier.size(32.dp),
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 320.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        items(records) { result ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (rowKeyOf(result) in selectedKeys) {
+                            Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .padding(vertical = 2.dp)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { onCopyRow(result) },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = CopyIcon,
-                    contentDescription = "复制",
-                    tint = MaterialTheme.colorScheme.primary,
+                Checkbox(
+                    checked = rowKeyOf(result) in selectedKeys,
+                    onCheckedChange = { onToggleSelect(result) },
                 )
+                Text(
+                    text = result.ip,
+                    modifier = Modifier.width(100.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = result.port.toString(),
+                    modifier = Modifier.width(40.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = formatLatency(result.avgMs),
+                    modifier = Modifier.width(56.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = formatSpeed(result.speed),
+                    modifier = Modifier.width(64.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = result.regionName.ifBlank { result.regionCode }.ifBlank { "-" },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                IconButton(
+                    onClick = { onCopyRow(result) },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = CopyIcon,
+                        contentDescription = "复制",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }
@@ -415,7 +429,8 @@ private fun entrySummary(entry: HistorySummary): String {
     return entry.fastestMs?.let { "$base    最快 $it ms" } ?: base
 }
 
-private fun formatTime(ts: Long): String = TIME_FORMAT.format(Date(ts))
+private fun formatTime(ts: Long): String =
+    Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()).format(TIME_FORMAT)
 
 private fun formatLatency(avgMs: Float?): String =
     avgMs?.let { String.format(Locale.US, "%.1f ms", it) } ?: "-"

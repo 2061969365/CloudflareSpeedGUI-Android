@@ -3,8 +3,13 @@ package com.cfst.android.engine.cfst
 import com.cfst.android.engine.ScanEngine
 import com.cfst.android.engine.model.ScanResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 class CfstEngine(
     private val binaryPath: () -> File?,
@@ -21,10 +26,10 @@ class CfstEngine(
         if (!bin.exists()) return false
         return runCatching {
             val exit = runner.run(
-                cmd = listOf(bin.absolutePath, "-v"),
+                cmd = listOf(bin.absolutePath, "-h"),
                 workDir = workDir(),
                 env = env,
-                timeoutMs = 10_000,
+                timeoutMs = 3_000,
             )
             exit == 0
         }.getOrDefault(false)
@@ -37,12 +42,17 @@ class CfstEngine(
         pingCount: Int,
         latencyLimit: Float,
         concurrency: Int,
+        pingTimeoutMs: Int,
         onProgress: (done: Int, total: Int) -> Unit,
     ): List<ScanResult> {
         val bin = binaryPath() ?: throw IllegalStateException("cfst binary unavailable")
         val dir = workDir()
         val ipFile = File(dir, "latency-ips.txt")
         val outCsv = File(dir, "latency-$port.csv")
+        withContext(Dispatchers.IO) {
+            ipFile.delete()
+            outCsv.delete()
+        }
         writeIps(ipFile, ips)
         val cmd = CfstBinary.latencyCmd(
             ipFile = ipFile.absolutePath,
@@ -53,16 +63,38 @@ class CfstEngine(
             outCsv = outCsv.absolutePath,
             concurrency = concurrency,
         )
-        val dynamicTimeout = CfstBinary.latencyTimeoutMs(ips.size, concurrency, timeoutMs)
-        val exit = runner.run(
-            cmd = listOf(bin.absolutePath) + cmd,
-            workDir = dir,
-            env = env,
-            timeoutMs = dynamicTimeout,
-            onProgress = { (done, total) -> onProgress(done, total) },
+        val dynamicTimeout = CfstBinary.latencyTimeoutMs(
+            ips.size,
+            concurrency,
+            timeoutMs,
+            pingCount = pingCount,
         )
-        if (exit != 0) return emptyList()
-        return readCsv(outCsv, port).filter { it.avgMs != null }
+        val startTs = System.currentTimeMillis()
+        val lastDone = AtomicInteger(0)
+        val exit = coroutineScope {
+            val heartbeat = launch {
+                while (isActive) {
+                    delay(HEARTBEAT_INTERVAL_MS)
+                    onProgress(lastDone.get(), ips.size)
+                }
+            }
+            try {
+                runner.run(
+                    cmd = listOf(bin.absolutePath) + cmd,
+                    workDir = dir,
+                    env = env,
+                    timeoutMs = dynamicTimeout,
+                    onProgress = { (done, total) ->
+                        lastDone.set(done)
+                        onProgress(done, total)
+                    },
+                )
+            } finally {
+                heartbeat.cancel()
+            }
+        }
+        if (exit != 0) throw IllegalStateException("cfst latency scan failed with exit code $exit")
+        return readCsv(outCsv, port, staleBefore = startTs).filter { it.avgMs != null }
     }
 
     override suspend fun speedScan(
@@ -79,6 +111,10 @@ class CfstEngine(
         val dir = workDir()
         val ipFile = File(dir, "speed-ips.txt")
         val outCsv = File(dir, "speed-$port.csv")
+        withContext(Dispatchers.IO) {
+            ipFile.delete()
+            outCsv.delete()
+        }
         writeIps(ipFile, ips)
         val cmd = CfstBinary.speedCmd(
             ipFile = ipFile.absolutePath,
@@ -90,24 +126,52 @@ class CfstEngine(
             outCsv = outCsv.absolutePath,
             concurrency = concurrency,
         )
-        val dynamicTimeout = CfstBinary.speedTimeoutMs(timeoutMs, downloadTime = downloadTime, downloadCount = downloadCount)
-        val exit = runner.run(
-            cmd = listOf(bin.absolutePath) + cmd,
-            workDir = dir,
-            env = env,
-            timeoutMs = dynamicTimeout,
-            onProgress = { (done, total) -> onProgress(done, total) },
+        val dynamicTimeout = CfstBinary.speedTimeoutMs(
+            timeoutMs,
+            downloadTime = downloadTime,
+            downloadCount = downloadCount,
+            survivors = ips.size,
         )
-        if (exit != 0) return emptyList()
-        return readCsv(outCsv, port).filter { it.speed != null && it.speed > 0f }
+        val startTs = System.currentTimeMillis()
+        val lastDone = AtomicInteger(0)
+        val exit = coroutineScope {
+            val heartbeat = launch {
+                while (isActive) {
+                    delay(HEARTBEAT_INTERVAL_MS)
+                    onProgress(lastDone.get(), ips.size)
+                }
+            }
+            try {
+                runner.run(
+                    cmd = listOf(bin.absolutePath) + cmd,
+                    workDir = dir,
+                    env = env,
+                    timeoutMs = dynamicTimeout,
+                    onProgress = { (done, total) ->
+                        lastDone.set(done)
+                        onProgress(done, total)
+                    },
+                )
+            } finally {
+                heartbeat.cancel()
+            }
+        }
+        if (exit != 0) throw IllegalStateException("cfst speed scan failed with exit code $exit")
+        return readCsv(outCsv, port, staleBefore = startTs).filter { it.speed != null && it.speed > 0f }
     }
 
     private suspend fun writeIps(file: File, ips: List<String>) = withContext(Dispatchers.IO) {
         file.writeText(ips.joinToString("\n"))
     }
 
-    private suspend fun readCsv(file: File, port: Int): List<ScanResult> = withContext(Dispatchers.IO) {
-        if (!file.exists()) return@withContext emptyList()
-        CfstCsvParser.parse(file.readText(), port, System.currentTimeMillis())
+    private suspend fun readCsv(file: File, port: Int, staleBefore: Long): List<ScanResult> =
+        withContext(Dispatchers.IO) {
+            if (!file.exists()) return@withContext emptyList()
+            if (file.lastModified() < staleBefore) return@withContext emptyList()
+            CfstCsvParser.parse(file.readText(), port, System.currentTimeMillis())
+        }
+
+    companion object {
+        private const val HEARTBEAT_INTERVAL_MS = 2_000L
     }
 }

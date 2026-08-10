@@ -38,9 +38,17 @@ class CfstCsvParserTest {
         assertEquals("104.16.2.2", lax.ip)
         assertEquals(88.3f, lax.avgMs!!, 0f)
         assertEquals(100.0f, lax.lossPct, 0f)
-        assertEquals(12.5f, lax.speed!!, 0f)
+        assertEquals(12.5f / 1.048576f, lax.speed!!, 0.01f)
         assertEquals("LAX", lax.regionCode)
         assertEquals("美国洛杉矶", lax.regionName)
+    }
+
+    @Test
+    fun parse_normalizes_mib_per_second_to_decimal_mb_per_second() {
+        val csv = "IP 地址,已发送,已接收,丢包率,平均延迟,下载速度(MB/s),地区码\n" +
+            "1.1.1.1,4,4,0.00,10.00,104.8576,HKG\n"
+        val results = CfstCsvParser.parse(csv, port = 443, testedAt = 1L)
+        assertEquals(100f, results[0].speed!!, 0.01f)
     }
 
     @Test

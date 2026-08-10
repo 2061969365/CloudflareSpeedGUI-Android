@@ -4,6 +4,7 @@ package com.cfst.android.ui.screens.result
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -40,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -65,6 +67,13 @@ fun ResultScreen(modifier: Modifier = Modifier) {
         ActivityResultContracts.CreateDocument("text/csv"),
     ) { uri ->
         if (uri != null) vm.exportCsv(context, uri)
+    }
+
+    LaunchedEffect(state.requestedRegion) {
+        if (state.requestedRegion != "全部") {
+            Toast.makeText(context, "所选地区已无结果，已回退为「全部」", Toast.LENGTH_SHORT).show()
+            vm.ackRegionFallback()
+        }
     }
 
     Column(
@@ -121,8 +130,10 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                     IconButton(onClick = { vm.setSortMode(nextSortMode(state.sortMode)) }) {
                         Icon(Icons.Filled.List, contentDescription = "切换排序")
                     }
-                    IconButton(onClick = { vm.copyAll(context) }) {
-                        Icon(Icons.Filled.Share, contentDescription = "复制全部")
+                    if (!editing) {
+                        IconButton(onClick = { vm.copyAll(context) }) {
+                            Icon(Icons.Filled.Share, contentDescription = "复制全部")
+                        }
                     }
                     IconButton(onClick = {
                         val timestamp = System.currentTimeMillis()
@@ -143,7 +154,7 @@ fun ResultScreen(modifier: Modifier = Modifier) {
 
             PullToRefreshBox(
                 isRefreshing = isRefreshing,
-                onRefresh = { vm.refresh() },
+                onRefresh = { vm.refresh(context) },
                 state = pullRefreshState,
                 modifier = Modifier.weight(1f),
             ) {
@@ -195,7 +206,7 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                         )
                     }
                 }
-                items(state.filteredResults) { result ->
+                items(state.filteredResults, key = { "${it.ip}:${it.port}" }) { result ->
                     ResultRow(
                         result = result,
                         editing = editing,
@@ -275,7 +286,10 @@ private fun ResultRow(
                 },
             )
             .padding(vertical = 2.dp)
-            .combinedClickable(onClick = {}, onLongClick = onCopy),
+            .combinedClickable(
+                onClick = { if (editing) onToggleSelect() },
+                onLongClick = if (editing) null else onCopy,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (editing) {

@@ -4,10 +4,10 @@ object CfstProgressParser {
 
     private val PROGRESS_RE =
         Regex("(?:进度|Progress|ETA|剩余).*?(\\d+)\\s*/\\s*(\\d+)", RegexOption.IGNORE_CASE)
-    private val BARE_RE = Regex("^(\\d+)\\s*/\\s*(\\d+)\\s")
+    private val BARE_RE = Regex("^(\\d+)\\s*/\\s*(\\d+)(?=\\s|$)")
 
     fun parseProgress(line: String): Pair<Int, Int>? {
-        val trimmed = line.trimEnd('\r')
+        val trimmed = line.trim()
         PROGRESS_RE.find(trimmed)?.let { m ->
             return m.groupValues[1].toInt() to m.groupValues[2].toInt()
         }

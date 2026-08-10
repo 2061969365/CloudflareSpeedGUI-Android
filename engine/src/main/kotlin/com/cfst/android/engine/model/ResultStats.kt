@@ -1,5 +1,7 @@
 package com.cfst.android.engine.model
 
+import java.util.Locale
+
 data class ResultStats(
     val total: Int,
     val topRegions: List<Pair<String, Int>>,
@@ -16,7 +18,7 @@ data class ResultStats(
         fun compute(records: List<ScanResult>): ResultStats {
             val topRegions = records
                 .filter { it.regionCode.isNotBlank() }
-                .groupBy { it.regionCode }
+                .groupBy { it.regionCode.uppercase(Locale.US) }
                 .mapNotNull { (code, list) ->
                     val bestMs = list.mapNotNull { it.avgMs }.minOrNull()
                         ?: return@mapNotNull null

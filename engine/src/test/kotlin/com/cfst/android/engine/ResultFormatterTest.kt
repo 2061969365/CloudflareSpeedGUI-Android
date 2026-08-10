@@ -27,22 +27,34 @@ class ResultFormatterTest {
 
     @Test
     fun formatCopyLine_matches_user_format() {
-        assertEquals("172.67.162.190#HK优选[19.21ms97.92mbps]", ResultFormatter.formatCopyLine(rec(speed = 12.24f)))
+        assertEquals("172.67.162.190#HK优选[19.21ms 97.92mbps]", ResultFormatter.formatCopyLine(rec(speed = 12.24f)))
     }
 
     @Test
-    fun formatCopyLine_null_speed_and_latency_show_zero() {
-        assertEquals("172.67.162.190#HK优选[0ms0mbps]", ResultFormatter.formatCopyLine(rec(avgMs = null, speed = null)))
+    fun formatCopyLine_null_speed_and_latency_show_dash() {
+        assertEquals("172.67.162.190#HK优选[-ms -mbps]", ResultFormatter.formatCopyLine(rec(avgMs = null, speed = null)))
     }
 
     @Test
     fun formatCopyLine_trailing_zeros_trimmed() {
-        assertEquals("1.1.1.1#SJ优选[20ms100mbps]", ResultFormatter.formatCopyLine(rec(ip = "1.1.1.1", regionCode = "SJC", avgMs = 20f, speed = 12.5f)))
+        assertEquals("1.1.1.1#SJ优选[20ms 100mbps]", ResultFormatter.formatCopyLine(rec(ip = "1.1.1.1", regionCode = "SJC", avgMs = 20f, speed = 12.5f)))
+    }
+
+    @Test
+    fun formatCopyLine_nan_and_infinity_show_zero() {
+        assertEquals(
+            "172.67.162.190#HK优选[0ms 0mbps]",
+            ResultFormatter.formatCopyLine(rec(avgMs = Float.NaN, speed = Float.POSITIVE_INFINITY)),
+        )
+        assertEquals(
+            "172.67.162.190#HK优选[0ms 0mbps]",
+            ResultFormatter.formatCopyLine(rec(avgMs = Float.NEGATIVE_INFINITY, speed = Float.NaN)),
+        )
     }
 
     @Test
     fun formatCopyLine_unknown_region_falls_back_to_code_prefix() {
-        assertEquals("9.9.9.9#XY优选[50ms50mbps]", ResultFormatter.formatCopyLine(rec(ip = "9.9.9.9", regionCode = "XYZ", avgMs = 50f, speed = 6.25f)))
+        assertEquals("9.9.9.9#XY优选[50ms 50mbps]", ResultFormatter.formatCopyLine(rec(ip = "9.9.9.9", regionCode = "XYZ", avgMs = 50f, speed = 6.25f)))
     }
 
     @Test
@@ -50,7 +62,7 @@ class ResultFormatterTest {
         val a = rec(ip = "1.1.1.1", regionCode = "HKG", avgMs = 19.21f, speed = 12.24f)
         val b = rec(ip = "2.2.2.2", regionCode = "LAX", avgMs = 40f, speed = 3f)
         assertEquals(
-            "1.1.1.1#HK优选[19.21ms97.92mbps]\n2.2.2.2#LA优选[40ms24mbps]",
+            "1.1.1.1#HK优选[19.21ms 97.92mbps]\n2.2.2.2#LA优选[40ms 24mbps]",
             ResultFormatter.formatCopyLines(listOf(a, b)),
         )
     }

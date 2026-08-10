@@ -33,8 +33,7 @@ fun CfTheme(
     content: @Composable () -> Unit,
 ) {
     val effectiveDarkTheme = darkTheme ?: isSystemInDarkTheme()
-    val useDynamicColor = darkTheme == null &&
-        dynamicColor &&
+    val useDynamicColor = dynamicColor &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val colorScheme = when {
         useDynamicColor -> {

@@ -3,21 +3,31 @@ package com.cfst.android.data
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import java.io.File
-import kotlinx.coroutines.Channel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class ConfigRepositoryTest {
 
     private fun createDataStore(): DataStore<Preferences> {
-        val file = File.createTempFile("cfst-configrepo-", ".preferences")
+        val file = File.createTempFile("cfst-configrepo-", ".preferences_pb")
+        file.delete()
         file.deleteOnExit()
         return PreferenceDataStoreFactory.create(corruptionHandler = null) { file }
     }
@@ -40,7 +50,7 @@ class ConfigRepositoryTest {
         "historyRetentionDays" to 30,
         "speedRegion" to "全部",
         "speedCount" to 50,
-        "pingConcurrency" to 200,
+        "pingConcurrency" to 8,
         "speedConcurrency" to 5,
     )
 
@@ -76,9 +86,13 @@ class ConfigRepositoryTest {
     @Test
     fun set_unknown_key_throws() = runTest {
         val repo = ConfigRepository(createDataStore())
-        assertThrows(IllegalArgumentException::class.java) {
+        val threw = try {
             repo.set("noSuchKey", 1)
+            false
+        } catch (_: IllegalArgumentException) {
+            true
         }
+        assertTrue(threw)
     }
 
     @Test
@@ -123,5 +137,44 @@ class ConfigRepositoryTest {
     fun get_unknown_key_returns_null() = runTest {
         val repo = ConfigRepository(createDataStore())
         assertNull(repo.get("noSuchKey"))
+    }
+
+    @Test
+    fun set_lastPorts_rejects_non_int_elements() = runTest {
+        val repo = ConfigRepository(createDataStore())
+        val nonIntThrew = try {
+            repo.set("lastPorts", listOf(443, "not-a-port"))
+            false
+        } catch (_: IllegalArgumentException) {
+            true
+        }
+        assertTrue(nonIntThrew)
+        val nonListThrew = try {
+            repo.set("lastPorts", 443)
+            false
+        } catch (_: IllegalArgumentException) {
+            true
+        }
+        assertTrue(nonListThrew)
+    }
+
+    @Test
+    fun get_lastPorts_falls_back_to_default_when_all_garbage() = runTest {
+        val ds = createDataStore()
+        val repo = ConfigRepository(ds)
+        val rawKey = stringPreferencesKey("lastPorts")
+        ds.edit { it[rawKey] = "abc,,def" }
+        assertEquals(listOf(443), repo.get("lastPorts"))
+        assertEquals(listOf(443), repo.flow.first()["lastPorts"])
+    }
+
+    @Test
+    fun defaults_align_with_engine_download_url() = runTest {
+        val repo = ConfigRepository(createDataStore())
+        assertEquals(
+            com.cfst.android.engine.cfst.CfstBinary.DEFAULT_SPEED_URL,
+            repo.get("downloadUrl"),
+        )
+        assertEquals(8, repo.get("pingConcurrency"))
     }
 }

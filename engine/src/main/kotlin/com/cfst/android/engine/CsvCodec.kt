@@ -5,6 +5,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Lossless CSV codec for [ScanResult].
@@ -17,7 +18,7 @@ import java.time.format.DateTimeFormatter
  * Number handling:
  * - Nullable float fields (avgMs, minMs, maxMs, speed) are written as an empty field when null
  *   and parsed back as null; when non-null they are written with 2 decimals (MB/s for speed,
- *   ms for latencies) and parsed back to the exact same Float value.
+ *   ms for latencies), so values representable at 2 decimals round-trip exactly.
  * - lossPct is non-nullable, always written with 2 decimals; an empty field parses to 0f.
  *
  * testedAt is epoch millis. The 测试时间 column stores a human readable UTC timestamp
@@ -27,6 +28,7 @@ import java.time.format.DateTimeFormatter
 object CsvCodec {
 
     private val TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+    private val TIME_FORMAT_NO_MILLIS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
     private const val HEADER =
         "IP 地址,端口,平均延迟(ms),下载速度(MB/s),地区码,测试时间,最小延迟(ms),最大延迟(ms),丢包率(%),地区名"
@@ -56,8 +58,9 @@ object CsvCodec {
     fun parse(text: String): List<ScanResult> {
         val lines = csvLines(text).filter { it.isNotBlank() }
         if (lines.isEmpty()) return emptyList()
-        return lines.drop(1).map { line ->
-            val f = splitCsvLine(line)
+        val dataLines = if (lines.first().startsWith("IP")) lines.drop(1) else lines
+        return dataLines.map { line ->
+            val f = runCatching { splitCsvLine(line) }.getOrElse { emptyList() }
             ScanResult(
                 ip = f.getOrElse(0) { "" },
                 port = f.getOrElse(1) { "" }.toIntOrNull() ?: 0,
@@ -74,16 +77,29 @@ object CsvCodec {
     }
 
     private fun formatNumber(v: Float?): String =
-        v?.let { it.toString() } ?: ""
+        v?.takeIf { it.isFinite() }?.let { value ->
+            val s = String.format(Locale.US, "%.2f", value)
+            s.trimEnd('0').trimEnd('.').let { if (it == "-0") "0" else it }
+        } ?: ""
 
     private fun parseFloatOrNull(s: String): Float? =
-        s.trim().takeIf { it.isNotEmpty() }?.toFloatOrNull()
+        s.trim().takeIf { it.isNotEmpty() }?.toFloatOrNull()?.takeIf { it.isFinite() }
 
     private fun formatTime(epochMillis: Long): String =
         Instant.ofEpochMilli(epochMillis).atZone(ZoneOffset.UTC).format(TIME_FORMAT)
 
-    private fun parseTime(s: String): Long =
-        LocalDateTime.parse(s.trim(), TIME_FORMAT).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+    private fun parseTime(s: String): Long {
+        val t = s.trim()
+        if (t.isEmpty()) return 0L
+        return runCatching {
+            LocalDateTime.parse(t, TIME_FORMAT).atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+        }.getOrElse {
+            runCatching {
+                LocalDateTime.parse(t, TIME_FORMAT_NO_MILLIS)
+                    .atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
+            }.getOrDefault(0L)
+        }
+    }
 
     private fun escape(field: String): String =
         if (field.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {

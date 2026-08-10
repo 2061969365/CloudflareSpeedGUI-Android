@@ -9,22 +9,38 @@ import com.cfst.android.CfApp
 import com.cfst.android.engine.model.ScanEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
+
+data class ScanStatus(
+    val running: Boolean = false,
+    val phase: String = "就绪",
+    val progress: Int = 0,
+    val finishedWithResults: Boolean = false,
+)
 
 class ScanService : Service() {
 
     companion object {
         const val ACTION_START = "com.cfst.android.action.START_SCAN"
         const val ACTION_CANCEL = ScanNotifier.ACTION_CANCEL
+
+        val scanStatus = MutableStateFlow(ScanStatus())
     }
 
     private lateinit var notifier: ScanNotifier
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var wakeLock: PowerManager.WakeLock? = null
+    private var collectorJob: Job? = null
+    private var watchdogJob: Job? = null
     private var receivedEvent = false
+    private var lastResultCount = 0
+    private var lastNotifyAt = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -53,13 +69,19 @@ class ScanService : Service() {
         wakeLock?.setReferenceCounted(false)
         wakeLock?.acquire()
         val controller = (application as CfApp).container.scanController
-        serviceScope.launch {
+        collectorJob?.cancel()
+        watchdogJob?.cancel()
+        receivedEvent = false
+        lastResultCount = 0
+        lastNotifyAt = 0L
+        scanStatus.value = ScanStatus(running = true, phase = "正在准备…", progress = 0)
+        collectorJob = serviceScope.launch {
             controller.events.collect { event -> handleEvent(event) }
         }
-        serviceScope.launch {
+        watchdogJob = serviceScope.launch {
             delay(5_000)
             if (!receivedEvent) {
-                (application as CfApp).container.scanController.cancel()
+                controller.cancel()
                 stopScan()
             }
         }
@@ -69,21 +91,54 @@ class ScanService : Service() {
         receivedEvent = true
         when (event) {
             is ScanEvent.Progress -> {
+                scanStatus.update {
+                    it.copy(phase = event.text, progress = event.pct.coerceIn(0, 100))
+                }
                 val etaText = event.etaMs?.let { "（预计 ${it / 1000}s 剩余）" } ?: ""
-                notifier.notifyProgress(event.pct, "${event.text}$etaText")
+                notifyThrottled(event.pct, "${event.text}$etaText")
             }
-            is ScanEvent.PhaseChanged -> notifier.notifyProgress(0, event.phase)
-            is ScanEvent.Log -> notifier.notifyProgress(0, event.line)
+            is ScanEvent.PhaseChanged -> {
+                scanStatus.update { it.copy(phase = event.phase) }
+                notifier.notifyProgress(0, event.phase)
+            }
+            is ScanEvent.Log -> {
+                scanStatus.update { it.copy(phase = event.line) }
+                notifyThrottled(0, event.line)
+            }
+            is ScanEvent.ResultReady -> {
+                lastResultCount = event.results.size
+                scanStatus.update { it.copy(progress = 100) }
+            }
             is ScanEvent.Error -> {
+                scanStatus.value = ScanStatus(running = false, phase = "错误", progress = 0)
                 notifier.notifyProgress(0, "扫描失败：${event.message}")
                 (application as CfApp).container.scanController.cancel()
                 stopScan()
             }
-            is ScanEvent.Done -> {
+            ScanEvent.Cancelled -> {
+                scanStatus.value = ScanStatus(running = false, phase = "已取消", progress = 0)
+                notifier.notifyProgress(0, "已取消")
+                stopScan()
+            }
+            ScanEvent.Done -> {
+                scanStatus.value = ScanStatus(
+                    running = false,
+                    phase = "完成",
+                    progress = 0,
+                    finishedWithResults = lastResultCount > 0,
+                )
+                notifier.notifyProgress(0, "扫描完成")
                 (application as CfApp).container.scanController.cancel()
                 stopScan()
             }
-            is ScanEvent.ResultReady -> { /* 结果展示由 ViewModel 负责 */ }
+        }
+    }
+
+    private fun notifyThrottled(pct: Int, text: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastNotifyAt >= 500 || pct >= 100) {
+            lastNotifyAt = now
+            notifier.notifyProgress(pct, text)
         }
     }
 

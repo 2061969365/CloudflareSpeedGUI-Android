@@ -6,11 +6,28 @@ object CfstBinary {
 
     const val DEFAULT_TIMEOUT_MS = 120_000L
 
-    fun latencyTimeoutMs(ipCount: Int, concurrency: Int, timeoutMs: Long = DEFAULT_TIMEOUT_MS): Long =
-        maxOf(timeoutMs, ipCount * 400L / maxOf(1, concurrency))
+    const val MAX_CONCURRENCY = 1000
 
-    fun speedTimeoutMs(timeoutMs: Long = DEFAULT_TIMEOUT_MS, downloadTime: Int, downloadCount: Int): Long =
-        maxOf(timeoutMs, downloadCount.toLong() * downloadTime * 1000L + 30_000L)
+    fun latencyTimeoutMs(
+        ipCount: Int,
+        concurrency: Int,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+        pingCount: Int = 0,
+    ): Long {
+        val c = maxOf(1, concurrency)
+        val estimatedMs = ipCount * 400L / c + pingCount * 2000L / c
+        return maxOf(timeoutMs, estimatedMs + 30_000L)
+    }
+
+    fun speedTimeoutMs(
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+        downloadTime: Int,
+        downloadCount: Int,
+        survivors: Int = 0,
+    ): Long {
+        val perHostMs = downloadCount.toLong() * downloadTime * 1000L
+        return maxOf(timeoutMs, perHostMs + survivors.toLong() * downloadTime * 1000L + 30_000L)
+    }
 
     fun latencyCmd(
         ipFile: String,
@@ -24,12 +41,13 @@ object CfstBinary {
     ): List<String> = listOf(
         "-f", ipFile,
         "-tp", port.toString(),
-        "-n", concurrency.toString(),
+        "-n", minOf(MAX_CONCURRENCY, maxOf(1, concurrency)).toString(),
         "-t", pingCount.toString(),
         "-httping",
+        // -dd locks flag/output semantics to CloudflareSpeedTest v2.3.5; newer versions may change arg handling.
         "-dd",
         "-tl", latencyLimit.toInt().toString(),
-        "-url", url,
+        "-url", if (url.isBlank()) DEFAULT_SPEED_URL else url,
         "-p", "0",
         "-o", outCsv,
     )
@@ -47,7 +65,7 @@ object CfstBinary {
         val args = mutableListOf(
             "-f", ipFile,
             "-tp", port.toString(),
-            "-n", concurrency.toString(),
+            "-n", minOf(MAX_CONCURRENCY, maxOf(1, concurrency)).toString(),
             "-t", "4",
             "-httping",
             "-dt", downloadTime.toString(),

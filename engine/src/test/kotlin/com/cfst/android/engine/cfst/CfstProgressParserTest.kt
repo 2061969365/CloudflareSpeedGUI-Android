@@ -22,6 +22,17 @@ class CfstProgressParserTest {
     }
 
     @Test
+    fun parseProgress_real_pb_output() {
+        assertEquals(12 to 456, CfstProgressParser.parseProgress("12 / 456 ... 可用: 8"))
+        assertEquals(1 to 456, CfstProgressParser.parseProgress("1 / 456 (0.2%) 可用: 0"))
+    }
+
+    @Test
+    fun parseProgress_bare_at_end_of_line() {
+        assertEquals(12 to 456, CfstProgressParser.parseProgress("12 / 456"))
+    }
+
+    @Test
     fun parseProgress_trailing_cr_stripped() {
         assertEquals(1 to 2, CfstProgressParser.parseProgress("进度: 1/2\r"))
     }
@@ -30,7 +41,8 @@ class CfstProgressParserTest {
     fun parseProgress_no_match_returns_null() {
         assertNull(CfstProgressParser.parseProgress("hello world"))
         assertNull(CfstProgressParser.parseProgress(""))
-        assertNull(CfstProgressParser.parseProgress("123/456"))
+        assertNull(CfstProgressParser.parseProgress("2026/08/10"))
+        assertNull(CfstProgressParser.parseProgress("192.168/24"))
     }
 
     @Test

@@ -28,9 +28,9 @@ class IpNetwork(
     }
 
     private fun expandV6All(): Sequence<String> = when {
-        prefixLen >= 128 -> sequenceOf(original)
+        prefixLen >= 128 -> sequenceOf(hostAt(0))
         prefixLen == 127 -> sequenceOf(hostAt(0), hostAt(1))
-        else -> sequenceOf(original)
+        else -> emptySequence()
     }
 
     fun hostAt(offset: Long): String = when (version) {
@@ -48,7 +48,11 @@ class IpNetwork(
     private fun sampleHostsV4(n: Int): List<String> {
         if (n <= 0) return emptyList()
         if (usable <= 0) return emptyList()
-        if (usable == 1L) return listOf(hostAt(0))
+        if (prefixLen >= 32) return listOf(hostAt(0))
+        if (prefixLen == 31) {
+            return if (n >= 2) listOf(hostAt(0), hostAt(1))
+            else listOf(hostAt(ThreadLocalRandom.current().nextLong(0L, 2L)))
+        }
         val want = minOf(n.toLong(), usable)
         if (want == usable) {
             return (1..usable).map { hostAt(it) }
@@ -64,12 +68,17 @@ class IpNetwork(
 
     private fun sampleHostsV6(n: Int): List<String> {
         if (n <= 0 || usable <= 0) return emptyList()
-        if (n >= 1 && usable == 1L) return listOf(original)
+        if (prefixLen >= 128) return listOf(hostAt(0))
+        if (prefixLen == 127) {
+            return if (n >= 2) listOf(hostAt(0), hostAt(1))
+            else listOf(hostAt(ThreadLocalRandom.current().nextLong(0L, 2L)))
+        }
         val want = minOf(n.toLong(), usable)
         val seen = HashSet<BigInteger>()
         val result = ArrayList<BigInteger>(want.toInt())
         while (result.size < want) {
-            val offset = BigInteger(128, ThreadLocalRandom.current()).mod(total).add(BigInteger.ONE)
+            val offset = BigInteger(128, ThreadLocalRandom.current())
+                .mod(BigInteger.valueOf(usable)).add(BigInteger.ONE)
             if (seen.add(offset)) result.add(offset)
         }
         return result.map { toV6String(network.add(it)) }
@@ -80,10 +89,44 @@ class IpNetwork(
         return "${(v ushr 24) and 0xFF}.${(v ushr 16) and 0xFF}.${(v ushr 8) and 0xFF}.${v and 0xFF}"
     }
 
-    private fun toV6String(addr: BigInteger): String =
-        InetAddress.getByAddress(addr.toByteArray().let { bytes ->
-            ByteArray(16) { if (it < 16 - bytes.size) 0 else bytes[it - (16 - bytes.size)] }
-        }).hostAddress
+    private fun toV6String(addr: BigInteger): String {
+        val bytes = ByteArray(16) { index ->
+            addr.shiftRight((15 - index) * 8).toByte()
+        }
+        val groups = (0 until 8).map { i ->
+            val v = ((bytes[i * 2].toInt() and 0xFF) shl 8) or (bytes[i * 2 + 1].toInt() and 0xFF)
+            v.toString(16)
+        }
+        var bestStart = -1
+        var bestLen = 0
+        var curStart = -1
+        var curLen = 0
+        for (i in 0 until 8) {
+            if (groups[i] == "0") {
+                if (curStart < 0) curStart = i
+                curLen++
+                if (curLen > bestLen) {
+                    bestStart = curStart
+                    bestLen = curLen
+                }
+            } else {
+                curStart = -1
+                curLen = 0
+            }
+        }
+        return if (bestLen >= 2) {
+            val head = groups.take(bestStart).joinToString(":")
+            val tail = groups.drop(bestStart + bestLen).joinToString(":")
+            when {
+                head.isEmpty() && tail.isEmpty() -> "::"
+                head.isEmpty() -> "::$tail"
+                tail.isEmpty() -> "$head::"
+                else -> "$head::$tail"
+            }
+        } else {
+            groups.joinToString(":")
+        }
+    }
 }
 
 object IpParser {
@@ -108,6 +151,7 @@ object IpParser {
         var value = 0L
         for (o in octets) {
             if (o.isEmpty() || o.length > 3 || !o.all { it.isDigit() }) return null
+            if (o.length > 1 && o.startsWith("0")) return null
             val n = o.toInt()
             if (n > 255) return null
             value = (value shl 8) or n.toLong()
@@ -116,7 +160,8 @@ object IpParser {
         val network = value and mask
         val total = 1L shl (32 - prefix)
         val usable = when {
-            prefix >= 31 -> 1L
+            prefix == 32 -> 1L
+            prefix == 31 -> 2L
             else -> (total - 2).coerceAtLeast(0L)
         }
         return IpNetwork(
@@ -145,7 +190,8 @@ object IpParser {
         val network = address.and(mask)
         val total = BigInteger.ONE.shiftLeft(128 - prefix)
         val usable = when {
-            prefix >= 127 -> BigInteger.ONE
+            prefix >= 128 -> BigInteger.ONE
+            prefix == 127 -> BigInteger.TWO
             else -> total.subtract(BigInteger.TWO).max(BigInteger.ZERO)
         }
         return IpNetwork(

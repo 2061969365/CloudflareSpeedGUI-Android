@@ -52,6 +52,18 @@ class ResultStatsTest {
     }
 
     @Test
+    fun region_codes_are_grouped_case_insensitively() {
+        val records = listOf(
+            scan(avgMs = 10f, regionCode = "hkg"),
+            scan(avgMs = 20f, regionCode = "HKG"),
+            scan(avgMs = 30f, regionCode = "sin"),
+        )
+        val stats = ResultStats.compute(records)
+        assertEquals(3, stats.total)
+        assertEquals(listOf("HKG" to 2, "SIN" to 1), stats.topRegions)
+    }
+
+    @Test
     fun fastestMs_is_min_of_non_null_avgMs() {
         val records = listOf(
             scan(avgMs = null),

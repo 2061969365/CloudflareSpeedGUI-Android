@@ -1,10 +1,12 @@
 package com.cfst.android.engine
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertNotNull
@@ -76,5 +78,36 @@ class SpeedProbeTest {
         val mbps = SpeedProbe.measure("127.0.0.1", server.port, url, durationSec = 1, speedLimit = 0f)
 
         assertNull(mbps)
+    }
+
+    @Test
+    fun zero_duration_returns_null_without_probing() = runBlocking {
+        val url = server.url("/__down").toString()
+        val mbps = SpeedProbe.measure("127.0.0.1", server.port, url, durationSec = 0, speedLimit = 0f)
+
+        assertNull(mbps)
+    }
+
+    @Test
+    fun small_body_returns_null() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("tiny response"))
+        val url = server.url("/__down").toString()
+        val mbps = SpeedProbe.measure("127.0.0.1", server.port, url, durationSec = 1, speedLimit = 0f)
+
+        assertNull(mbps)
+    }
+
+    @Test
+    fun read_timeout_configuration_applies() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val url = server.url("/__down").toString()
+        val start = System.nanoTime()
+        val mbps = withTimeout(30_000) {
+            SpeedProbe.measure("127.0.0.1", server.port, url, durationSec = 1, speedLimit = 0f)
+        }
+        val elapsedSec = (System.nanoTime() - start) / 1_000_000_000.0
+
+        assertNull(mbps)
+        assertTrue("expected explicit read timeout to bound the call", elapsedSec < 25)
     }
 }

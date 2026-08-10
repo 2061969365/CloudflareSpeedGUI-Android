@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -37,29 +38,43 @@ class HistoryRepositoryTest {
         db.close()
     }
 
-    private fun entry(startedAt: Long) = HistoryEntry(
+    private fun entry(startedAt: Long, recordsCsv: String = "") = HistoryEntry(
         startedAt = startedAt,
         ipCount = 3,
         resultCount = 2,
         fastestMs = 42,
         regionsSummary = "HKG:2;LAX:1",
-        recordsCsv = "",
+        recordsCsv = recordsCsv,
     )
 
     @Test
-    fun insertAndGetAll_emitsInDescOrder() = runTest {
+    fun insertAndGetSummaries_emitsInDescOrder() = runTest {
         repo.add(entry(1000))
         repo.add(entry(3000))
         repo.add(entry(2000))
-        val all = repo.all.first()
-        assertEquals(listOf(3000L, 2000L, 1000L), all.map { it.startedAt })
+        val summaries = repo.summaries.first()
+        assertEquals(listOf(3000L, 2000L, 1000L), summaries.map { it.startedAt })
     }
 
     @Test
     fun insert_returnsGeneratedId() = runTest {
         val id = repo.add(entry(1000))
         assertTrue(id > 0)
-        assertEquals(listOf(id), repo.all.first().map { it.id })
+        assertEquals(listOf(id), repo.summaries.first().map { it.id })
+    }
+
+    @Test
+    fun summaries_doNotCarryRecordsCsvBlob() = runTest {
+        val id = repo.add(entry(1000, recordsCsv = "1.1.1.1#443".repeat(1000)))
+        val summary = repo.summaries.first().single()
+        assertEquals(id, summary.id)
+    }
+
+    @Test
+    fun recordsCsv_returnsStoredCsvById() = runTest {
+        val id = repo.add(entry(1000, recordsCsv = "1.1.1.1#443;2.2.2.2#443"))
+        assertEquals("1.1.1.1#443;2.2.2.2#443", repo.recordsCsv(id))
+        assertNull(repo.recordsCsv(id + 999))
     }
 
     @Test
@@ -68,7 +83,7 @@ class HistoryRepositoryTest {
         repo.add(entry(2000))
         val id = repo.add(entry(3000))
         repo.delete(id)
-        assertEquals(listOf(2000L, 1000L), repo.all.first().map { it.startedAt })
+        assertEquals(listOf(2000L, 1000L), repo.summaries.first().map { it.startedAt })
     }
 
     @Test
@@ -76,7 +91,7 @@ class HistoryRepositoryTest {
         repo.add(entry(1000))
         repo.add(entry(2000))
         repo.deleteOlderThan(1500)
-        assertEquals(listOf(2000L), repo.all.first().map { it.startedAt })
+        assertEquals(listOf(2000L), repo.summaries.first().map { it.startedAt })
     }
 
     @Test
@@ -84,6 +99,6 @@ class HistoryRepositoryTest {
         repo.add(entry(1000))
         repo.add(entry(2000))
         repo.clearAll()
-        assertTrue(repo.all.first().isEmpty())
+        assertTrue(repo.summaries.first().isEmpty())
     }
 }

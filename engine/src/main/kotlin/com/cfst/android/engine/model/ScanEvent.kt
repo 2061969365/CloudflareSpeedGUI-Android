@@ -7,4 +7,5 @@ sealed interface ScanEvent {
     data class ResultReady(val results: List<ScanResult>) : ScanEvent
     data class Error(val message: String) : ScanEvent
     data object Done : ScanEvent
+    data object Cancelled : ScanEvent
 }

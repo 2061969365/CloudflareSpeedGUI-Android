@@ -4,6 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cfst.android.CfApp
+import com.cfst.android.engine.cfst.CfstBinary
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,7 +22,7 @@ data class SettingsUiState(
     val probeCount: Int = 500,
     val fullScanProbeCount: Int = 5000,
     val downloadUrl: String = "",
-    val pingConcurrency: Int = 200,
+    val pingConcurrency: Int = 8,
     val speedConcurrency: Int = 5,
     val historyRetentionDays: Int = 30,
     val darkTheme: Boolean = false,
@@ -32,9 +35,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
+    // 每键即时写放大 → 防抖提交：连续改动只落一次盘（配合 UI 层失焦提交，双保险）。
+    private var persistJob: Job? = null
+
     init {
         viewModelScope.launch {
-            _state.value = buildState(container.configRepository.flow.first())
+            val initial = runCatching { buildState(container.configRepository.flow.first()) }
+                .getOrDefault(SettingsUiState())
+            _state.value = initial
         }
     }
 
@@ -63,10 +71,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setDownloadUrl(value: String) {
-        _state.update { it.copy(downloadUrl = value) }
-        viewModelScope.launch {
-            runCatching { container.configRepository.set("downloadUrl", value) }
-        }
+        // 留空写入默认 URL（契约7 双保险：WP-A3 的 ScanViewModel 侧还会对空串再兜底一次）。
+        val normalized = value.ifBlank { CfstBinary.DEFAULT_SPEED_URL }
+        _state.update { it.copy(downloadUrl = normalized) }
+        debouncedPersist { container.configRepository.set("downloadUrl", normalized) }
     }
 
     fun setPingConcurrency(value: Int) {
@@ -84,17 +92,25 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setDarkTheme(value: Boolean) {
         _state.update { it.copy(darkTheme = value) }
         container.setDarkTheme(value)
-        viewModelScope.launch {
-            runCatching { container.configRepository.set("darkTheme", value) }
-        }
+        debouncedPersist { container.configRepository.set("darkTheme", value) }
     }
 
     fun resetDefaults() {
+        persistJob?.cancel()
         viewModelScope.launch {
-            container.configRepository.resetDefaults()
-            val rebuilt = buildState(container.configRepository.flow.first())
+            runCatching { container.configRepository.resetDefaults() }
+            val rebuilt = runCatching { buildState(container.configRepository.flow.first()) }
+                .getOrDefault(SettingsUiState())
             _state.value = rebuilt
             container.setDarkTheme(rebuilt.darkTheme)
+        }
+    }
+
+    private fun debouncedPersist(block: suspend () -> Unit) {
+        persistJob?.cancel()
+        persistJob = viewModelScope.launch {
+            delay(PERSIST_DEBOUNCE_MS)
+            runCatching { block() }
         }
     }
 
@@ -107,9 +123,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     ) {
         val clamped = value.coerceIn(min, max)
         _state.update { apply(it, clamped) }
-        viewModelScope.launch {
-            runCatching { container.configRepository.set(key, clamped) }
-        }
+        debouncedPersist { container.configRepository.set(key, clamped) }
     }
 
     private fun buildState(cfg: Map<String, Any>): SettingsUiState = SettingsUiState(
@@ -119,8 +133,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         latencyLimit = intOf(cfg, "latencyLimit", 200),
         probeCount = intOf(cfg, "probeCount", 500),
         fullScanProbeCount = intOf(cfg, "fullScanProbeCount", 5000),
-        downloadUrl = cfg["downloadUrl"] as? String ?: "",
-        pingConcurrency = intOf(cfg, "pingConcurrency", 200),
+        downloadUrl = cfg["downloadUrl"] as? String ?: CfstBinary.DEFAULT_SPEED_URL,
+        pingConcurrency = intOf(cfg, "pingConcurrency", 8),
         speedConcurrency = intOf(cfg, "speedConcurrency", 5),
         historyRetentionDays = intOf(cfg, "historyRetentionDays", 30),
         darkTheme = cfg["darkTheme"] as? Boolean ?: false,
@@ -128,4 +142,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private fun intOf(map: Map<String, Any>, key: String, default: Int): Int =
         (map[key] as? Number)?.toInt() ?: default
+
+    private companion object {
+        const val PERSIST_DEBOUNCE_MS = 500L
+    }
 }

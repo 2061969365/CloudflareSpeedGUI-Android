@@ -4,6 +4,7 @@ package com.cfst.android.ui.screens.scan
 
 import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -18,7 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -51,6 +52,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +63,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cfst.android.engine.ColoRegionMapper
 import com.cfst.android.engine.model.IpSource
 import com.cfst.android.ui.components.StatCard
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 private val PORT_OPTIONS = listOf(443, 8443, 2083, 2087, 2053, 2096)
@@ -78,36 +83,49 @@ private val SOURCE_OPTIONS = listOf(
     IpSource.CMIP to "CMIP(6.3万)",
     IpSource.CUSTOM to "自定义文件",
 )
+private const val MAX_IPS = 500_000
 
 @Composable
 fun ScanScreen(modifier: Modifier = Modifier, onScanFinished: () -> Unit = {}) {
     val vm: ScanViewModel = viewModel()
     val state by vm.uiState.collectAsState()
-    val scanFinished by vm.scanFinished.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var speedExpanded by remember { mutableStateOf(false) }
     var regionExpanded by remember { mutableStateOf(false) }
     var showQuickTestDialog by remember { mutableStateOf(false) }
     var quickIpText by remember { mutableStateOf("") }
     var quickPortText by remember { mutableStateOf("443") }
+    var quickTestError by remember { mutableStateOf("") }
     val logListState = rememberLazyListState()
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { vm.setCustomLines(readUriLines(context, it)) }
+        if (uri != null) {
+            scope.launch {
+                val lines = withContext(Dispatchers.IO) { readUriLines(context, uri) }
+                vm.setCustomLines(lines)
+                Toast.makeText(context, "已导入 ${lines.size} 条", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            vm.revertCustomSource()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        vm.scanFinished.collect { onScanFinished() }
     }
 
     LaunchedEffect(state.log.size) {
         if (state.log.isNotEmpty()) {
-            logListState.scrollToItem(state.log.size - 1)
+            val lastVisible = logListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            if (!logListState.isScrollInProgress && lastVisible >= state.log.lastIndex - 1) {
+                logListState.scrollToItem(state.log.lastIndex)
+            }
         }
     }
 
-    LaunchedEffect(scanFinished) {
-        if (scanFinished) {
-            onScanFinished()
-            vm.consumeScanFinished()
-        }
-    }
+    val paramsLocked = state.running
+    val customEmpty = state.source == IpSource.CUSTOM && state.customLines.isEmpty()
 
     Column(
         modifier = modifier
@@ -118,10 +136,19 @@ fun ScanScreen(modifier: Modifier = Modifier, onScanFinished: () -> Unit = {}) {
     ) {
         Text(text = "测速", style = MaterialTheme.typography.headlineMedium)
 
+        if (paramsLocked) {
+            Text(
+                text = "扫描进行中，参数已锁定，完成后可再次修改",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
         Text(text = "场景", style = MaterialTheme.typography.titleMedium)
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             SCENE_OPTIONS.forEachIndexed { index, (scene, label) ->
                 SegmentedButton(
+                    enabled = !paramsLocked,
                     selected = state.scene == scene,
                     onClick = { vm.onSceneSelected(scene) },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = SCENE_OPTIONS.size),
@@ -140,11 +167,14 @@ fun ScanScreen(modifier: Modifier = Modifier, onScanFinished: () -> Unit = {}) {
         ) {
             SOURCE_OPTIONS.forEach { (source, label) ->
                 FilterChip(
+                    enabled = !paramsLocked,
                     selected = state.source == source,
                     onClick = {
-                        vm.setSource(source)
                         if (source == IpSource.CUSTOM) {
+                            vm.selectCustomSource()
                             filePicker.launch(arrayOf("*/*"))
+                        } else {
+                            vm.setSource(source)
                         }
                     },
                     label = { Text(label) },
@@ -161,6 +191,7 @@ fun ScanScreen(modifier: Modifier = Modifier, onScanFinished: () -> Unit = {}) {
         ) {
             PORT_OPTIONS.forEach { port ->
                 FilterChip(
+                    enabled = !paramsLocked,
                     selected = port in state.ports,
                     onClick = { vm.togglePort(port) },
                     label = { Text(port.toString()) },
@@ -168,12 +199,13 @@ fun ScanScreen(modifier: Modifier = Modifier, onScanFinished: () -> Unit = {}) {
             }
         }
 
-OutlinedTextField(
+        OutlinedTextField(
             value = state.maxIps.toString(),
             onValueChange = { raw ->
-                vm.setMaxIps(raw.filter { it.isDigit() }.toIntOrNull() ?: 0)
+                vm.setMaxIps((raw.filter { it.isDigit() }.toIntOrNull() ?: 0).coerceAtMost(MAX_IPS))
             },
-            label = { Text("抽取IP数 (0 = 采样)") },
+            enabled = !paramsLocked,
+            label = { Text("抽取IP数 (0 = 采样, 上限 $MAX_IPS)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth(),
@@ -188,6 +220,7 @@ OutlinedTextField(
                 onValueChange = { raw ->
                     vm.setPingConcurrency((raw.filter { it.isDigit() }.toIntOrNull()?.coerceIn(1, 1500)) ?: 1)
                 },
+                enabled = !paramsLocked,
                 label = { Text("延迟并发 (1-1500)") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -198,6 +231,7 @@ OutlinedTextField(
                 onValueChange = { raw ->
                     vm.setSpeedConcurrency(raw.filter { it.isDigit() }.toIntOrNull()?.coerceIn(1, 32) ?: 1)
                 },
+                enabled = !paramsLocked,
                 label = { Text("测速并发 (1-32)") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -210,37 +244,50 @@ OutlinedTextField(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(text = "多端口择优", modifier = Modifier.weight(1f))
-            Switch(checked = state.multiPortBest, onCheckedChange = vm::setMultiPortBest)
+            Switch(
+                checked = state.multiPortBest,
+                onCheckedChange = vm::setMultiPortBest,
+                enabled = !paramsLocked,
+            )
             Spacer(modifier = Modifier.width(16.dp))
             Text(text = "全量扫描", modifier = Modifier.weight(1f))
-            Switch(checked = state.fullScan, onCheckedChange = vm::setFullScan)
+            Switch(
+                checked = state.fullScan,
+                onCheckedChange = vm::setFullScan,
+                enabled = !paramsLocked,
+            )
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { speedExpanded = !speedExpanded },
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = "下载测速",
                         style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = !paramsLocked) { speedExpanded = !speedExpanded },
                     )
-                    Switch(checked = state.speedEnabled, onCheckedChange = vm::setSpeedEnabled)
+                    Switch(
+                        checked = state.speedEnabled,
+                        onCheckedChange = vm::setSpeedEnabled,
+                        enabled = !paramsLocked,
+                    )
                 }
                 if (speedExpanded) {
                     Spacer(modifier = Modifier.height(8.dp))
                     ExposedDropdownMenuBox(
-                        expanded = regionExpanded,
-                        onExpandedChange = { regionExpanded = it },
+                        expanded = regionExpanded && !paramsLocked,
+                        onExpandedChange = { if (!paramsLocked) regionExpanded = it },
                     ) {
                         OutlinedTextField(
                             value = ColoRegionMapper.map(state.region),
                             onValueChange = {},
                             readOnly = true,
+                            enabled = !paramsLocked,
                             label = { Text("测速地区") },
                             trailingIcon = {
                                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = regionExpanded)
@@ -278,6 +325,7 @@ OutlinedTextField(
                     ) {
                         SPEED_COUNT_OPTIONS.forEach { count ->
                             FilterChip(
+                                enabled = !paramsLocked,
                                 selected = state.speedCount == count,
                                 onClick = { vm.setSpeedCount(count) },
                                 label = { Text(count.toString()) },
@@ -288,8 +336,9 @@ OutlinedTextField(
             }
         }
 
-Button(
+        Button(
             onClick = { if (state.running) vm.cancelScan() else vm.start() },
+            enabled = if (state.running) true else !customEmpty,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
@@ -297,10 +346,19 @@ Button(
             Text(if (state.running) "取消" else "开始扫描")
         }
 
+        if (customEmpty) {
+            Text(
+                text = "自定义来源需先导入 IP 文件才能开始扫描",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
         OutlinedButton(
             onClick = {
                 quickIpText = ""
                 quickPortText = "443"
+                quickTestError = ""
                 showQuickTestDialog = true
             },
             enabled = !state.running,
@@ -353,13 +411,13 @@ Button(
         if (state.log.isEmpty()) {
             Text(text = "暂无日志", style = MaterialTheme.typography.bodySmall)
         } else {
-LazyColumn(
+            LazyColumn(
                 state = logListState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(200.dp),
             ) {
-                items(state.log) { line ->
+                itemsIndexed(state.log, key = { index, _ -> index }) { _, line ->
                     Text(
                         text = line,
                         style = MaterialTheme.typography.bodySmall,
@@ -380,6 +438,7 @@ LazyColumn(
                         value = quickIpText,
                         onValueChange = { quickIpText = it },
                         label = { Text("IP 地址") },
+                        isError = quickTestError.isNotEmpty(),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -388,11 +447,19 @@ LazyColumn(
                         onValueChange = { raw ->
                             quickPortText = raw.filter { it.isDigit() }
                         },
-                        label = { Text("端口") },
+                        label = { Text("端口 (1-65535)") },
+                        isError = quickTestError.isNotEmpty(),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (quickTestError.isNotEmpty()) {
+                        Text(
+                            text = quickTestError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -400,10 +467,18 @@ LazyColumn(
                     onClick = {
                         val ip = quickIpText.trim()
                         val port = quickPortText.toIntOrNull() ?: 443
-                        if (ip.isNotEmpty()) {
+                        if (isValidIpText(ip) && port in 1..65535) {
+                            quickTestError = ""
                             vm.quickTest(ip, port)
+                            showQuickTestDialog = false
+                        } else {
+                            quickTestError = when {
+                                !isValidIpText(ip) && port !in 1..65535 ->
+                                    "IP 地址格式不正确，且端口需在 1-65535 之间"
+                                !isValidIpText(ip) -> "IP 地址格式不正确"
+                                else -> "端口需在 1-65535 之间"
+                            }
                         }
-                        showQuickTestDialog = false
                     },
                 ) {
                     Text("开始测量")
@@ -426,6 +501,43 @@ private fun readUriLines(context: Context, uri: Uri): List<String> {
             ?: emptyList()
     }.getOrElse { emptyList() }
     return lines.map { it.trim() }.filter { it.isNotEmpty() }
+}
+
+private fun isValidIpText(text: String): Boolean {
+    val s = text.trim()
+    if (s.isEmpty()) return false
+    return if (':' in s) isValidIpv6(s) else isValidIpv4(s)
+}
+
+private fun isValidIpv4(s: String): Boolean {
+    val parts = s.split('.')
+    if (parts.size != 4) return false
+    return parts.all { part ->
+        part.isNotEmpty() &&
+            part.length <= 3 &&
+            part.all { it.isDigit() } &&
+            (part.toIntOrNull()?.let { it in 0..255 } == true)
+    }
+}
+
+private fun isValidIpv6(s: String): Boolean {
+    if (s.count { it == ':' } > 7) return false
+    val parts = s.split(':')
+    if (parts.size > 8) return false
+    var emptySeen = false
+    var groups = 0
+    for (part in parts) {
+        if (part.isEmpty()) {
+            if (emptySeen) return false
+            emptySeen = true
+        } else {
+            if (part.length > 4 || !part.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) {
+                return false
+            }
+            groups++
+        }
+    }
+    return if (emptySeen) groups <= 7 else groups == 8
 }
 
 private fun formatEta(etaMs: Long): String {

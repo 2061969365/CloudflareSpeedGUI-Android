@@ -19,24 +19,29 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.ceil
 
 class ScanController(
     private val engine: ScanEngine,
     private val regionResolver: suspend (String, Int) -> String?,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
-    val events: MutableSharedFlow<ScanEvent> = MutableSharedFlow(extraBufferCapacity = 256)
+    val events: MutableSharedFlow<ScanEvent> = MutableSharedFlow(replay = 1, extraBufferCapacity = 256)
 
     private var scope: CoroutineScope? = null
 
+    @Volatile
+    private var epoch = 0
+
     fun start(req: ScanRequest) {
         val previous = scope
+        val myEpoch = ++epoch
         previous?.cancel()
         val newScope = CoroutineScope(SupervisorJob() + dispatcher)
         scope = newScope
         newScope.launch {
-            previous?.coroutineContext?.get(Job)?.join()
-            run(req)
+            withTimeoutOrNull(2_000) { previous?.coroutineContext?.get(Job)?.join() }
+            run(req, myEpoch)
         }
     }
 
@@ -44,10 +49,10 @@ class ScanController(
         scope?.cancel()
     }
 
-    private suspend fun run(req: ScanRequest) {
+    private suspend fun run(req: ScanRequest, myEpoch: Int) {
         try {
             emit(ScanEvent.PhaseChanged("生成IP列表"))
-            val generatorMaxIps = if (req.fullScan) req.fullProbeCount else req.probeCount
+            val generatorMaxIps = if (req.fullScan) req.fullProbeCount else req.maxIps
             val ips = IpGenerator.generate(req.customLines, generatorMaxIps, req.fullScan) { pct ->
                 events.tryEmit(ScanEvent.Progress(pct, "生成IP列表 $pct%", null))
             }
@@ -71,29 +76,36 @@ class ScanController(
             val finalRecords = if (req.speedEnabled) {
                 emit(ScanEvent.Log("选择下载测速目标 (地区=${req.region}, 数量=${req.speedCount})"))
                 val targets = selectSpeedTargets(req, survivors)
-                if (targets.isEmpty()) {
+                val finalTargets = if (targets.isEmpty()) {
                     events.tryEmit(ScanEvent.Log("地区解析失败，回退选择最快存活 IP"))
                     survivors.sortedBy { it.avgMs ?: Float.MAX_VALUE }.take(req.speedCount)
                 } else {
-                    emit(ScanEvent.PhaseChanged("下载测速"))
-                    runSpeedPhase(req, targets)
+                    targets
                 }
+                emit(ScanEvent.PhaseChanged("下载测速"))
+                runSpeedPhase(req, finalTargets)
             } else {
                 survivors
             }
 
-            val sorted = finalRecords.sortedBy { it.avgMs ?: Float.MAX_VALUE }
+            val sorted = finalRecords
+                .filter { !req.speedEnabled || it.speed != null }
+                .sortedBy { it.avgMs ?: Float.MAX_VALUE }
             emit(ScanEvent.ResultReady(sorted))
             emit(ScanEvent.PhaseChanged("完成"))
             emit(ScanEvent.Done)
         } catch (e: CancellationException) {
-            events.tryEmit(ScanEvent.Log("已取消"))
-            events.tryEmit(ScanEvent.Error("已取消"))
-            events.tryEmit(ScanEvent.Done)
+            if (epoch == myEpoch) {
+                emit(ScanEvent.Log("已取消"))
+                emit(ScanEvent.Cancelled)
+                emit(ScanEvent.Done)
+            }
         } catch (e: Exception) {
-            emit(ScanEvent.Log("错误: ${e.message}"))
-            emit(ScanEvent.Error(e.message ?: "未知错误"))
-            emit(ScanEvent.Done)
+            if (epoch == myEpoch) {
+                emit(ScanEvent.Log("错误: ${e.message}"))
+                emit(ScanEvent.Error(e.message ?: "未知错误"))
+                emit(ScanEvent.Done)
+            }
         }
     }
 
@@ -113,6 +125,7 @@ class ScanController(
                     pingCount = req.pingCount,
                     latencyLimit = latencyLimit,
                     concurrency = req.pingConcurrency,
+                    pingTimeoutMs = req.pingTimeoutMs,
                 ) { done, total ->
                     reportProgress(phaseStart, completed + done, totalTasks, "延迟扫描")
                 }
@@ -138,6 +151,7 @@ class ScanController(
                 pingCount = req.pingCount,
                 latencyLimit = latencyLimit,
                 concurrency = req.pingConcurrency,
+                pingTimeoutMs = req.pingTimeoutMs,
             ) { done, total ->
                 reportProgress(phaseStart, completed + done, totalTasks, "延迟扫描")
             }
@@ -153,7 +167,7 @@ class ScanController(
     private var lastEmittedPct = -1
 
     private fun reportProgress(startNs: Long, done: Int, total: Int, label: String) {
-        if (done == 0) return
+        if (done == 0 || total <= 0) return
         val now = System.nanoTime()
         val pct = done * 100 / total
         val mustEmit = done == total || pct != lastEmittedPct || now - throttledAtNs >= 200_000_000L
@@ -174,24 +188,39 @@ class ScanController(
     }
 
     private suspend fun selectSpeedTargets(req: ScanRequest, survivors: List<ScanResult>): List<ScanResult> {
-        if (req.region == "全部") {
+        if (normalizeRegion(req.region) == "全部") {
             return survivors
                 .sortedBy { it.avgMs ?: Float.MAX_VALUE }
                 .take(req.speedCount)
         }
         val resolved = Collections.synchronizedMap(mutableMapOf<String, ScanResult>())
-        val limited = dispatcher.limitedParallelism(maxOf(1, req.pingConcurrency))
+        val concurrency = minOf(maxOf(1, req.pingConcurrency), 16)
+        val limited = dispatcher.limitedParallelism(concurrency)
         coroutineScope {
             for (rec in survivors) {
                 launch(limited) {
                     currentCoroutineContext().ensureActive()
                     val code = rec.regionCode.takeIf { it.isNotBlank() }
-                        ?: runCatching { regionResolver(rec.ip, rec.port) }.getOrNull()
-                    if (code != null && regionCode(code) == regionCode(req.region)) {
-                        resolved[rec.ip] = rec.copy(
+                        ?: try {
+                            regionResolver(rec.ip, rec.port)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            null
+                        }
+                    if (code != null && normalizeRegion(code) == normalizeRegion(req.region)) {
+                        val candidate = rec.copy(
                             regionCode = code,
                             regionName = ColoRegionMapper.map(code),
                         )
+                        synchronized(resolved) {
+                            val existing = resolved[candidate.ip]
+                            if (existing == null ||
+                                (candidate.avgMs ?: Float.MAX_VALUE) < (existing.avgMs ?: Float.MAX_VALUE)
+                            ) {
+                                resolved[candidate.ip] = candidate
+                            }
+                        }
                     }
                 }
             }
@@ -203,14 +232,18 @@ class ScanController(
 
     private suspend fun runSpeedPhase(req: ScanRequest, targets: List<ScanResult>): List<ScanResult> {
         val url = req.downloadUrl.ifBlank { CfstBinary.DEFAULT_SPEED_URL }
-        val groupTimeoutMs = req.downloadCount.toLong() * req.downloadTime * 1000L + 30_000L
         val grouped = targets.groupBy { it.port }.toList()
         val result = Collections.synchronizedList(mutableListOf<ScanResult>())
         val groupIndex = AtomicInteger(0)
+        val globalTotal = targets.size
+        var globalDone = 0
 
         for ((port, group) in grouped) {
             val idx = groupIndex.incrementAndGet()
             emit(ScanEvent.Log("测速组 $idx/${grouped.size} 端口 $port (${group.size} 个 IP)"))
+            val concurrency = maxOf(1, req.speedConcurrency)
+            val batches = ceil(group.size / concurrency.toDouble()).toLong()
+            val groupTimeoutMs = maxOf(60_000L, batches * req.downloadTime * 1500L + 30_000L)
             val sped = withTimeoutOrNull(groupTimeoutMs) {
                 engine.speedScan(
                     ips = group.map { it.ip },
@@ -221,15 +254,18 @@ class ScanController(
                     speedLimit = req.speedLimit,
                     concurrency = req.speedConcurrency,
                 ) { done, total ->
-                    events.tryEmit(
-                        ScanEvent.Progress(
-                            pct = idx * 100 / grouped.size,
-                            text = "测速中 group $idx/${grouped.size} ($done/$total)",
-                            etaMs = null,
-                            done = done,
-                            total = total,
+                    val accDone = globalDone + done
+                    if (accDone > 0 && globalTotal > 0) {
+                        events.tryEmit(
+                            ScanEvent.Progress(
+                                pct = accDone * 100 / globalTotal,
+                                text = "测速中 group $idx/${grouped.size} ($done/$total)",
+                                etaMs = null,
+                                done = accDone,
+                                total = globalTotal,
+                            )
                         )
-                    )
+                    }
                 }
             }
             if (sped == null) {
@@ -239,6 +275,7 @@ class ScanController(
             for (rec in group) {
                 result.add(rec.copy(speed = speedByIp[rec.ip]))
             }
+            globalDone += group.size
         }
         return result.toList()
     }
@@ -247,6 +284,6 @@ class ScanController(
         events.emit(event)
     }
 
-    private fun regionCode(value: String): String =
-        value.trim().substringBefore(" (").trim()
+    private fun normalizeRegion(value: String): String =
+        value.trim().substringBefore(" (").trim().uppercase()
 }

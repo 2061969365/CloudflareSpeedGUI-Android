@@ -72,4 +72,56 @@ class IpGeneratorTest {
         assertTrue("full scan of /0 must be capped to a sane bound", ips.size in 1..2_000_000)
         assertTrue(ips.isNotEmpty())
     }
+
+    @Test
+    fun zero_network_with_maxIps_zero_does_not_oom() {
+        val ips = IpGenerator.generate(listOf("0.0.0.0/0"), 0, false, ::noop)
+        assertTrue("per-/24 sampling of /0 must be capped", ips.size in 1..200_000)
+        assertTrue("all hosts must be plain IPv4", ips.all { it.split(".").size == 4 && '/' !in it })
+    }
+
+    @Test
+    fun bare_ips_truncated_by_max_ips() {
+        val bare = (1..100).map { "10.0.$it.1" }
+        val ips = IpGenerator.generate(bare, 5, false, ::noop)
+        assertEquals("bare IPs must be truncated to maxIps", 5, ips.size)
+    }
+
+    @Test
+    fun bare_ips_and_networks_capped_together() {
+        val ips = IpGenerator.generate(listOf("1.1.1.1", "2.2.2.2", "173.245.48.0/20"), 5, false, ::noop)
+        assertTrue("bare IPs + network samples must not exceed maxIps", ips.distinct().size <= 5)
+    }
+
+    @Test
+    fun ipv6_fullScan_produces_no_slash_ips() {
+        val ips = IpGenerator.generate(
+            listOf("2606:4700::/64", "2606:4700::/127", "2606:4700::1/128"),
+            0, true, ::noop,
+        )
+        assertTrue("full scan of v6 must still produce hosts", ips.isNotEmpty())
+        assertTrue("no generated IP may contain '/'", ips.all { '/' !in it })
+    }
+
+    @Test
+    fun ipv6_sampling_produces_plain_ips() {
+        val ips = IpGenerator.generate(listOf("2606:4700::1/128", "2606:4700::/127"), 0, false, ::noop)
+        assertTrue(ips.isNotEmpty())
+        assertTrue("no sampled v6 IP may contain '/'", ips.all { '/' !in it })
+    }
+
+    @Test
+    fun invalid_ipv6_not_accepted_as_bare_ip() {
+        val ips = IpGenerator.generate(listOf("1:2:3:4:5:6:7", "::", "2606:4700::1"), 0, false, ::noop)
+        assertFalse(ips.contains("1:2:3:4:5:6:7"))
+        assertFalse(ips.contains("::"))
+        assertTrue(ips.contains("2606:4700::1"))
+    }
+
+    @Test
+    fun leading_zero_ipv4_rejected_as_bare_ip() {
+        val ips = IpGenerator.generate(listOf("01.2.3.4", "1.1.1.1"), 0, false, ::noop)
+        assertFalse("leading-zero octet must be rejected", ips.contains("01.2.3.4"))
+        assertTrue(ips.contains("1.1.1.1"))
+    }
 }

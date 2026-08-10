@@ -29,6 +29,7 @@ enum class ResultSortMode { LATENCY_ASC, SPEED_DESC, LOSS_ASC }
 data class ResultUiState(
     val results: List<ScanResult> = emptyList(),
     val regionFilter: String = "全部",
+    val requestedRegion: String = "全部",
     val regions: List<String> = emptyList(),
     val sortMode: ResultSortMode = ResultSortMode.LATENCY_ASC,
     val filteredResults: List<ScanResult> = emptyList(),
@@ -51,12 +52,17 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
 
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
-    fun refresh() {
+    fun refresh(context: Context) {
         viewModelScope.launch {
             _isRefreshing.value = true
             _refreshTick.update { it + 1 }
-            delay(350)
+            delay(80)
             _isRefreshing.value = false
+            if (uiState.value.results.isEmpty()) {
+                toast(context, "暂无扫描结果")
+            } else {
+                toast(context, "结果来自最近一次扫描")
+            }
         }
     }
 
@@ -68,18 +74,18 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         _filterState.update { it.copy(sortMode = mode) }
     }
 
+    fun ackRegionFallback() {
+        _filterState.update { it.copy(regionFilter = "全部") }
+    }
+
     fun copyAll(context: Context) {
         val results = uiState.value.filteredResults
         if (results.isEmpty()) {
             toast(context, "暂无结果可复制")
             return
         }
-        viewModelScope.launch {
-            val csv = withContext(Dispatchers.IO) { CsvCodec.encode(results) }
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("CF测速结果", csv))
-            toast(context, "已复制 ${results.size} 条结果")
-        }
+        clipboardPut(context, ResultFormatter.formatCopyLines(results))
+        toast(context, "已复制 ${results.size} 条结果")
     }
 
     fun exportCsv(context: Context, uri: Uri) {
@@ -113,6 +119,22 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedIps = MutableStateFlow<Set<String>>(emptySet())
 
     val selectedIps: StateFlow<Set<String>> = _selectedIps.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            uiState.collect { state ->
+                val visible = HashSet<String>(state.filteredResults.size)
+                state.filteredResults.forEach { visible.add(rowKey(it.ip, it.port)) }
+                _selectedIps.update { cur ->
+                    if (cur.isEmpty() || cur.all { it in visible }) {
+                        cur
+                    } else {
+                        cur.filter { it in visible }.toSet()
+                    }
+                }
+            }
+        }
+    }
 
     fun setEditing(enabled: Boolean) {
         _editing.value = enabled
@@ -164,12 +186,9 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             listOf("全部") + results.map { it.regionName }.filter { it.isNotBlank() }.distinct()
         }
-        val effectiveRegion =
-            if (filter.regionFilter == "全部" || filter.regionFilter in allRegions) {
-                filter.regionFilter
-            } else {
-                "全部"
-            }
+        val requested = filter.regionFilter
+        val regionFallback = requested != "全部" && requested !in allRegions
+        val effectiveRegion = if (regionFallback) "全部" else requested
         val base = if (effectiveRegion == "全部") {
             results
         } else {
@@ -190,6 +209,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
         return ResultUiState(
             results = results,
             regionFilter = effectiveRegion,
+            requestedRegion = if (regionFallback) requested else "全部",
             regions = allRegions,
             sortMode = filter.sortMode,
             filteredResults = sorted,

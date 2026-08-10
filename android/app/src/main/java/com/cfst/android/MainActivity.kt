@@ -13,7 +13,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
@@ -40,7 +40,7 @@ private fun NotificationPermissionRequest() {
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
-    var requested by remember { mutableStateOf(false) }
+    var requested by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!requested &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

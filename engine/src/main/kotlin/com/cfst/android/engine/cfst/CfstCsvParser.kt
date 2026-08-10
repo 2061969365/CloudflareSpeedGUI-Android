@@ -5,6 +5,8 @@ import com.cfst.android.engine.model.ScanResult
 
 object CfstCsvParser {
 
+    private const val MIB_TO_MB = 1.048576f
+
     fun parse(csvText: String): List<ScanResult> = parse(csvText, port = 0, testedAt = 0L)
 
     fun parse(csvText: String, port: Int, testedAt: Long): List<ScanResult> {
@@ -23,7 +25,7 @@ object CfstCsvParser {
                 minMs = null,
                 maxMs = null,
                 lossPct = (fields[3].trim().toFloatOrNull() ?: 0f) * 100f,
-                speed = fields[5].trim().toFloatOrNull(),
+                speed = fields[5].trim().toFloatOrNull()?.div(MIB_TO_MB),
                 regionCode = regionCode,
                 regionName = ColoRegionMapper.map(regionCode),
                 testedAt = testedAt,

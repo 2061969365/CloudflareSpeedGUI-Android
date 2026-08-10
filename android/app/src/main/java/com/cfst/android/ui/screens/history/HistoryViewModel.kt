@@ -14,7 +14,6 @@ import com.cfst.android.engine.CsvCodec
 import com.cfst.android.engine.model.ResultFormatter
 import com.cfst.android.engine.model.ScanResult
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +24,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val MAX_EXPORT_RECORDS = 20_000
 
 class HistoryViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -47,8 +48,14 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     fun refresh() {
         viewModelScope.launch {
             _isRefreshing.value = true
+            val entries = withContext(Dispatchers.IO) {
+                runCatching { container.historyRepository.summaries.first() }
+                    .getOrDefault(emptyList())
+            }
+            val currentIds = entries.mapTo(HashSet()) { it.id }
+            _detailMap.update { map -> map.filterKeys { it in currentIds } }
+            _historySelection.update { map -> map.filterKeys { it in currentIds } }
             _refreshTick.update { it + 1 }
-            delay(350)
             _isRefreshing.value = false
         }
     }
@@ -67,6 +74,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
     fun loadDetail(id: Long) {
         if (_detailMap.value.containsKey(id)) return
+        if (summaries.value.none { it.id == id }) return
         viewModelScope.launch {
             val records = withContext(Dispatchers.IO) {
                 val csv = container.historyRepository.recordsCsv(id)
@@ -76,12 +84,14 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                     runCatching { CsvCodec.parse(csv) }.getOrDefault(emptyList())
                 }
             }
+            if (summaries.value.none { it.id == id }) return@launch
             _detailMap.update { it + (id to records) }
         }
     }
 
     fun collapseDetail(id: Long) {
         _detailMap.update { it - id }
+        _historySelection.update { it - id }
     }
 
     fun delete(id: Long) {
@@ -167,31 +177,57 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         viewModelScope.launch {
-            val records = withContext(Dispatchers.IO) {
-                entries.flatMap { entry ->
-                    try {
-                        val csv = container.historyRepository.recordsCsv(entry.id) ?: ""
-                        CsvCodec.parse(csv)
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                }
-            }
-            if (records.isEmpty()) {
-                toast(context, "暂无数据")
-                return@launch
-            }
+            var written = 0
+            var truncated = false
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
                     val output = context.contentResolver.openOutputStream(uri)
                         ?: throw IllegalStateException("无法打开输出流")
                     output.use { out ->
-                        out.write(CsvCodec.encode(records).toByteArray(Charsets.UTF_8))
+                        var headerWritten = false
+                        for (entry in entries) {
+                            if (written >= MAX_EXPORT_RECORDS) {
+                                truncated = true
+                                break
+                            }
+                            val csv = runCatching {
+                                container.historyRepository.recordsCsv(entry.id)
+                            }.getOrNull()
+                            if (csv.isNullOrBlank()) continue
+                            val records = runCatching { CsvCodec.parse(csv) }
+                                .getOrDefault(emptyList())
+                            if (records.isEmpty()) continue
+                            val remaining = MAX_EXPORT_RECORDS - written
+                            val batch = if (records.size > remaining) {
+                                truncated = true
+                                records.take(remaining)
+                            } else {
+                                records
+                            }
+                            val encoded = CsvCodec.encode(batch)
+                            val payload = if (headerWritten) {
+                                encoded.substringAfter('\n')
+                            } else {
+                                encoded
+                            }
+                            if (payload.isNotEmpty()) {
+                                out.write(payload.toByteArray(Charsets.UTF_8))
+                            }
+                            headerWritten = true
+                            written += batch.size
+                        }
                     }
                 }.isSuccess
             }
             if (ok) {
-                toast(context, "已导出 ${records.size} 条结果")
+                toast(
+                    context,
+                    when {
+                        written == 0 -> "暂无数据可导出"
+                        truncated -> "已导出 $written 条结果（超出上限已截断）"
+                        else -> "已导出 $written 条结果"
+                    },
+                )
             } else {
                 toast(context, "导出失败")
             }

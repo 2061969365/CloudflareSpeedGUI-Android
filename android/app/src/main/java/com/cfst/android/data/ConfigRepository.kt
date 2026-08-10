@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.cfst.android.engine.cfst.CfstBinary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -18,10 +19,10 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
     private val stringEntries: Map<String, Entry<String>> = mapOf(
         "lastSource" to Entry(stringPreferencesKey("lastSource"), "official"),
         "lastScene" to Entry(stringPreferencesKey("lastScene"), "quick"),
-        "downloadUrl" to Entry(
-            stringPreferencesKey("downloadUrl"),
-            "https://speed.hatexianyu.ccwu.cc/?bytes=209715200",
-        ),
+        // 偏离 2026-08-09-android-app.md:155 的旧值
+        // (http://speed.cloudflare.com/__down?bytes=50000000)，按契约7与引擎
+        // CfstBinary.DEFAULT_SPEED_URL 三处统一，保证留空时回退的默认地址一致。
+        "downloadUrl" to Entry(stringPreferencesKey("downloadUrl"), CfstBinary.DEFAULT_SPEED_URL),
         "speedRegion" to Entry(stringPreferencesKey("speedRegion"), "全部"),
     )
 
@@ -41,7 +42,8 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
         "fullScanProbeCount" to Entry(intPreferencesKey("fullScanProbeCount"), 5000),
         "historyRetentionDays" to Entry(intPreferencesKey("historyRetentionDays"), 30),
         "speedCount" to Entry(intPreferencesKey("speedCount"), 50),
-        "pingConcurrency" to Entry(intPreferencesKey("pingConcurrency"), 200),
+        // 偏离 2026-08-09-android-app.md:155 之外的旧值 200；按设计文档镜像桌面 DEFAULTS 为 8。
+        "pingConcurrency" to Entry(intPreferencesKey("pingConcurrency"), 8),
         "speedConcurrency" to Entry(intPreferencesKey("speedConcurrency"), 5),
     )
 
@@ -71,8 +73,8 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun resetDefaults() {
-        val preserved = protectedKeys.associateWith { key -> readValue(dataStore.data.first(), key) }
         dataStore.edit { prefs ->
+            val preserved = protectedKeys.associateWith { key -> readValue(prefs, key) }
             prefs.clear()
             for (key in allKeys) {
                 if (key !in preserved) {
@@ -101,9 +103,9 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
 
     private fun writeValue(prefs: MutablePreferences, key: String, value: Any) {
         if (key == LAST_PORTS_KEY) {
-            if (value !is List<*>) {
+            if (value !is List<*> || value.any { it !is Int }) {
                 throw IllegalArgumentException(
-                    "Config key '$key' requires a List<Int>, got ${value::class.simpleName}",
+                    "Config key '$key' requires a List<Int>, got $value",
                 )
             }
             prefs[lastPortsKey] = value.joinToString(",")
@@ -139,8 +141,10 @@ class ConfigRepository(private val dataStore: DataStore<Preferences>) {
         throw IllegalArgumentException("Unknown config key: $key")
     }
 
-    private fun toPortsList(raw: String): List<Int> =
-        if (raw.isBlank()) emptyList() else raw.split(',').mapNotNull { it.trim().toIntOrNull() }
+    private fun toPortsList(raw: String): List<Int> {
+        val ports = raw.split(',').mapNotNull { it.trim().toIntOrNull() }
+        return if (ports.isEmpty()) DEFAULT_PORTS else ports
+    }
 
     private companion object {
         const val LAST_PORTS_KEY = "lastPorts"

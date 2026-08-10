@@ -1,6 +1,7 @@
 package com.cfst.android.engine
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -55,15 +56,45 @@ class IpParserTest {
     }
 
     @Test
+    fun v4_slash31_sample_includes_both_usable_addresses() {
+        val n = IpParser.parseCidr("10.0.0.0/31")!!
+        assertEquals(2, n.expandAll().count())
+        assertEquals(setOf("10.0.0.0", "10.0.0.1"), n.sampleHosts(2).toSet())
+        val one = n.sampleHosts(1).single()
+        assertTrue("single sample must be one of the two usable addresses", one == "10.0.0.0" || one == "10.0.0.1")
+    }
+
+    @Test
     fun v6_slash128_generates_self() {
         val n = IpParser.parseCidr("2606:4700::1/128")!!
-        val hosts = n.sampleHosts(1)
-        assertEquals(1, hosts.size)
+        assertEquals(1, n.expandAll().count())
+        val host = n.sampleHosts(1).single()
+        assertFalse("sample must not contain '/'", host.contains("/"))
+        assertEquals("2606:4700::1", host)
+        assertEquals(listOf("2606:4700::1"), n.expandAll().toList())
     }
 
     @Test
     fun v6_slash127_generates_p2p_pair() {
         val n = IpParser.parseCidr("2606:4700::/127")!!
-        assertEquals(2, n.expandAll().toList().size)
+        assertEquals(2, n.expandAll().count())
+        val hosts = n.expandAll().toList()
+        assertEquals(2, hosts.size)
+        assertTrue(hosts.all { !it.contains("/") })
+        assertEquals(setOf("2606:4700::", "2606:4700::1"), hosts.toSet())
+        assertEquals(setOf("2606:4700::", "2606:4700::1"), n.sampleHosts(2).toSet())
+    }
+
+    @Test
+    fun v6_large_prefix_expandAll_returns_nothing() {
+        val n = IpParser.parseCidr("2606:4700::/64")!!
+        assertTrue("non-enumerable v6 prefix must not emit a CIDR string", n.expandAll().toList().isEmpty())
+    }
+
+    @Test
+    fun leading_zero_octets_rejected() {
+        assertNull(IpParser.parseCidr("01.2.3.4"))
+        assertNull(IpParser.parseCidr("10.0.0.01"))
+        assertNull(IpParser.parseCidr("10.0.00.1/24"))
     }
 }

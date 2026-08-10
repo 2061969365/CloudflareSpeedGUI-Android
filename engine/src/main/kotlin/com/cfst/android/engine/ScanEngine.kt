@@ -15,6 +15,7 @@ interface ScanEngine {
         pingCount: Int,
         latencyLimit: Float,
         concurrency: Int,
+        pingTimeoutMs: Int,
         onProgress: (done: Int, total: Int) -> Unit,
     ): List<ScanResult>
 

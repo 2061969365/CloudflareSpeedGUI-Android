@@ -1,6 +1,7 @@
 package com.cfst.android.engine
 
 import com.cfst.android.engine.model.LatencyStats
+import com.cfst.android.engine.model.ScanResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -47,6 +48,7 @@ class KotlinEngineTest {
             pingCount = 2,
             latencyLimit = 100f,
             concurrency = 4,
+            pingTimeoutMs = 2000,
             onProgress = { _, _ -> },
         )
         assertTrue("peak concurrency ${counters.peak()} must be > 1", counters.peak() > 1)
@@ -98,6 +100,196 @@ class KotlinEngineTest {
         assertEquals(ips.toSet(), results.map { it.ip }.toSet())
         assertTrue(results.all { it.speed != null })
     }
+
+    @Test
+    fun latencyScan_zero_limit_keeps_all() = runTest {
+        val ips = listOf("10.0.0.1", "10.0.0.2")
+        val engine = KotlinEngine(
+            latencyProbe = { _, _, _, _ -> LatencyStats(2, 2, 0f, 150f, 150f, 150f) },
+            speedProbe = { _, _, _, _, _ -> 1f },
+        )
+        val results = engine.latencyScan(
+            ips = ips,
+            port = 443,
+            probeCount = 2,
+            pingCount = 2,
+            latencyLimit = 0f,
+            concurrency = 2,
+            pingTimeoutMs = 2000,
+            onProgress = { _, _ -> },
+        )
+        assertEquals(2, results.size)
+    }
+
+    @Test
+    fun latencyScan_forwards_pingTimeoutMs() = runTest {
+        var capturedTimeout = -1
+        val engine = KotlinEngine(
+            latencyProbe = { _, _, _, timeoutMs ->
+                capturedTimeout = timeoutMs
+                LatencyStats(2, 2, 0f, 5f, 5f, 5f)
+            },
+            speedProbe = { _, _, _, _, _ -> 1f },
+        )
+        engine.latencyScan(
+            ips = listOf("10.0.0.1"),
+            port = 443,
+            probeCount = 2,
+            pingCount = 2,
+            latencyLimit = 100f,
+            concurrency = 1,
+            pingTimeoutMs = 4321,
+            onProgress = { _, _ -> },
+        )
+        assertEquals(4321, capturedTimeout)
+    }
+
+    @Test
+    fun fallback_retries_latency_when_primary_throws() = runTest {
+        var primaryLatencyCalls = 0
+        val primary = object : ScanEngine {
+            override val name = "primary"
+            override suspend fun isAvailable() = true
+            override suspend fun latencyScan(
+                ips: List<String>, port: Int, probeCount: Int, pingCount: Int,
+                latencyLimit: Float, concurrency: Int, pingTimeoutMs: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> {
+                primaryLatencyCalls++
+                throw IllegalStateException("primary latency failed")
+            }
+            override suspend fun speedScan(
+                ips: List<String>, port: Int, url: String, downloadTime: Int,
+                downloadCount: Int, speedLimit: Float, concurrency: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = emptyList()
+        }
+        val fallback = object : ScanEngine {
+            override val name = "fallback"
+            override suspend fun isAvailable() = true
+            override suspend fun latencyScan(
+                ips: List<String>, port: Int, probeCount: Int, pingCount: Int,
+                latencyLimit: Float, concurrency: Int, pingTimeoutMs: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = listOf(scanResult("1.1.1.1", port, 10f))
+            override suspend fun speedScan(
+                ips: List<String>, port: Int, url: String, downloadTime: Int,
+                downloadCount: Int, speedLimit: Float, concurrency: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = emptyList()
+        }
+        val engine = FallbackEngine(primary, fallback)
+        val results = engine.latencyScan(
+            ips = listOf("1.1.1.1"),
+            port = 443,
+            probeCount = 2,
+            pingCount = 2,
+            latencyLimit = 100f,
+            concurrency = 1,
+            pingTimeoutMs = 2000,
+            onProgress = { _, _ -> },
+        )
+        assertEquals(1, primaryLatencyCalls)
+        assertEquals(listOf("1.1.1.1"), results.map { it.ip })
+        assertEquals("primary", engine.resolvedEngineName())
+    }
+
+    @Test
+    fun fallback_retries_speed_when_primary_throws() = runTest {
+        var primarySpeedCalls = 0
+        val primary = object : ScanEngine {
+            override val name = "primary"
+            override suspend fun isAvailable() = true
+            override suspend fun latencyScan(
+                ips: List<String>, port: Int, probeCount: Int, pingCount: Int,
+                latencyLimit: Float, concurrency: Int, pingTimeoutMs: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = emptyList()
+            override suspend fun speedScan(
+                ips: List<String>, port: Int, url: String, downloadTime: Int,
+                downloadCount: Int, speedLimit: Float, concurrency: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> {
+                primarySpeedCalls++
+                throw RuntimeException("primary speed failed")
+            }
+        }
+        val fallback = object : ScanEngine {
+            override val name = "fallback"
+            override suspend fun isAvailable() = true
+            override suspend fun latencyScan(
+                ips: List<String>, port: Int, probeCount: Int, pingCount: Int,
+                latencyLimit: Float, concurrency: Int, pingTimeoutMs: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = emptyList()
+            override suspend fun speedScan(
+                ips: List<String>, port: Int, url: String, downloadTime: Int,
+                downloadCount: Int, speedLimit: Float, concurrency: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = listOf(scanResult("1.1.1.1", port, 0f).copy(speed = 8f))
+        }
+        val engine = FallbackEngine(primary, fallback)
+        val results = engine.speedScan(
+            ips = listOf("1.1.1.1"),
+            port = 443,
+            url = "https://example.com/file",
+            downloadTime = 2,
+            downloadCount = 1,
+            speedLimit = 0f,
+            concurrency = 1,
+            onProgress = { _, _ -> },
+        )
+        assertEquals(1, primarySpeedCalls)
+        assertEquals(8f, results.single().speed)
+    }
+
+    @Test
+    fun fallback_resolvedEngineName_reflects_availability() = runTest {
+        val primary = object : ScanEngine {
+            override val name = "primary"
+            override suspend fun isAvailable() = false
+            override suspend fun latencyScan(
+                ips: List<String>, port: Int, probeCount: Int, pingCount: Int,
+                latencyLimit: Float, concurrency: Int, pingTimeoutMs: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = emptyList()
+            override suspend fun speedScan(
+                ips: List<String>, port: Int, url: String, downloadTime: Int,
+                downloadCount: Int, speedLimit: Float, concurrency: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = emptyList()
+        }
+        val fallback = object : ScanEngine {
+            override val name = "fallback"
+            override suspend fun isAvailable() = true
+            override suspend fun latencyScan(
+                ips: List<String>, port: Int, probeCount: Int, pingCount: Int,
+                latencyLimit: Float, concurrency: Int, pingTimeoutMs: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = emptyList()
+            override suspend fun speedScan(
+                ips: List<String>, port: Int, url: String, downloadTime: Int,
+                downloadCount: Int, speedLimit: Float, concurrency: Int,
+                onProgress: (done: Int, total: Int) -> Unit,
+            ): List<ScanResult> = emptyList()
+        }
+        val engine = FallbackEngine(primary, fallback)
+        assertTrue(engine.isAvailable())
+        assertEquals("fallback", engine.resolvedEngineName())
+    }
+
+    private fun scanResult(ip: String, port: Int, avgMs: Float) = ScanResult(
+        ip = ip,
+        port = port,
+        avgMs = avgMs,
+        minMs = avgMs,
+        maxMs = avgMs,
+        lossPct = 0f,
+        speed = null,
+        regionCode = "",
+        regionName = "",
+        testedAt = 0L,
+    )
 
     private class Counters {
         private var current = 0

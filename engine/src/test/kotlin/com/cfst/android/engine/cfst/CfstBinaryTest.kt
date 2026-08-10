@@ -1,6 +1,7 @@
 package com.cfst.android.engine.cfst
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CfstBinaryTest {
@@ -41,7 +42,7 @@ class CfstBinaryTest {
     @Test
     fun latencyCmd_default_url_when_blank() {
         val cmd = CfstBinary.latencyCmd("ips.txt", 443, 300, 4, 200f, "out.csv", url = "")
-        assertEquals("", cmd[cmd.indexOf("-url") + 1])
+        assertEquals(CfstBinary.DEFAULT_SPEED_URL, cmd[cmd.indexOf("-url") + 1])
     }
 
     @Test
@@ -112,7 +113,7 @@ class CfstBinaryTest {
     }
 
     @Test
-    fun latencyCmd_concurrency_overrides_probe_count_in_n() {
+    fun latencyCmd_concurrency_capped_at_1000() {
         val cmd = CfstBinary.latencyCmd(
             ipFile = "ips.txt",
             port = 443,
@@ -122,7 +123,7 @@ class CfstBinaryTest {
             outCsv = "out.csv",
             concurrency = 1500,
         )
-        assertEquals("1500", cmd[cmd.indexOf("-n") + 1])
+        assertEquals("1000", cmd[cmd.indexOf("-n") + 1])
     }
 
     @Test
@@ -141,16 +142,47 @@ class CfstBinaryTest {
     }
 
     @Test
+    fun speedCmd_concurrency_capped_at_1000() {
+        val cmd = CfstBinary.speedCmd(
+            ipFile = "ips.txt",
+            port = 443,
+            url = "https://url",
+            downloadTime = 10,
+            downloadCount = 3,
+            speedLimit = 0f,
+            outCsv = "out.csv",
+            concurrency = 1500,
+        )
+        assertEquals("1000", cmd[cmd.indexOf("-n") + 1])
+    }
+
+    @Test
     fun latency_timeout_scales_with_ip_count_and_inverse_concurrency() {
         assertEquals(120_000L, CfstBinary.latencyTimeoutMs(ipCount = 100, concurrency = 100))
-        assertEquals(4_000_000L, CfstBinary.latencyTimeoutMs(ipCount = 1_000_000, concurrency = 100))
-        assertEquals(40_000_000L, CfstBinary.latencyTimeoutMs(ipCount = 1_000_000, concurrency = 10))
+        assertEquals(4_030_000L, CfstBinary.latencyTimeoutMs(ipCount = 1_000_000, concurrency = 100))
+        assertEquals(40_030_000L, CfstBinary.latencyTimeoutMs(ipCount = 1_000_000, concurrency = 10))
         assertEquals(120_000L, CfstBinary.latencyTimeoutMs(ipCount = 1, concurrency = 0))
+    }
+
+    @Test
+    fun latency_timeout_includes_ping_count_factor() {
+        val withoutPing = CfstBinary.latencyTimeoutMs(ipCount = 100_000, concurrency = 100)
+        val withPing = CfstBinary.latencyTimeoutMs(ipCount = 100_000, concurrency = 100, pingCount = 100)
+        assertTrue(withPing > withoutPing)
+        assertEquals(432_000L, withPing)
     }
 
     @Test
     fun speed_timeout_scales_with_download_work() {
         assertEquals(530_000L, CfstBinary.speedTimeoutMs(downloadTime = 10, downloadCount = 50))
         assertEquals(120_000L, CfstBinary.speedTimeoutMs(downloadTime = 3, downloadCount = 3))
+    }
+
+    @Test
+    fun speed_timeout_includes_survivor_factor() {
+        assertEquals(
+            1_530_000L,
+            CfstBinary.speedTimeoutMs(downloadTime = 10, downloadCount = 50, survivors = 100),
+        )
     }
 }

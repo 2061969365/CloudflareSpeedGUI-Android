@@ -29,6 +29,7 @@ class KotlinEngine(
         pingCount: Int,
         latencyLimit: Float,
         concurrency: Int,
+        pingTimeoutMs: Int,
         onProgress: (done: Int, total: Int) -> Unit,
     ): List<ScanResult> {
         val completed = AtomicInteger(0)
@@ -40,14 +41,14 @@ class KotlinEngine(
                 launch(limited) {
                     currentCoroutineContext().ensureActive()
                     val stats = try {
-                        latencyProbe(ip, port, pingCount, DEFAULT_PING_TIMEOUT_MS)
+                        latencyProbe(ip, port, pingCount, pingTimeoutMs)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: Exception) {
                         null
                     }
                     onProgress(completed.incrementAndGet(), total)
-                    if (stats?.avgMs != null && stats.avgMs <= latencyLimit) {
+                    if (stats?.avgMs != null && (latencyLimit <= 0f || stats.avgMs <= latencyLimit)) {
                         results.add(
                             ScanResult(
                                 ip = ip,
@@ -113,9 +114,5 @@ class KotlinEngine(
                 testedAt = System.currentTimeMillis(),
             )
         }
-    }
-
-    private companion object {
-        const val DEFAULT_PING_TIMEOUT_MS = 2000
     }
 }
