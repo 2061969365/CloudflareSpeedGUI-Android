@@ -18,28 +18,35 @@ object IpGenerator {
         for (line in lines) {
             if ('/' in line) {
                 IpParser.parseCidr(line)?.let { networks += line to it }
-            } else if (isValidIp(line)) {
-                bareIps += line
+                continue
             }
+            val range = IpParser.parseRange(line)
+            if (range != null) {
+                networks += line to range
+                continue
+            }
+            val bare = IpParser.stripV4Port(line) ?: line
+            if (isValidIp(bare)) bareIps += bare
         }
 
         val total = networks.size
         progress(0)
 
         if (fullScan) {
+            val MAX_FULLSCAN_TOTAL = 2_000_000
+            val effectiveMax = if (maxIps > 0) minOf(maxIps, MAX_FULLSCAN_TOTAL) else MAX_FULLSCAN_TOTAL
             val seen = linkedSetOf<String>()
             seen += bareIps
-            val MAX_FULLSCAN_TOTAL = 2_000_000
             networks.forEachIndexed { i, (_, net) ->
-                if (seen.size < MAX_FULLSCAN_TOTAL) {
+                if (seen.size < effectiveMax) {
                     if (net.version == 4) {
                         net.expandAll().forEach {
-                            if (seen.size >= MAX_FULLSCAN_TOTAL) return@forEachIndexed
+                            if (seen.size >= effectiveMax) return@forEachIndexed
                             seen += it
                         }
                     } else {
                         net.sampleHosts(1).forEach {
-                            if (seen.size >= MAX_FULLSCAN_TOTAL) return@forEachIndexed
+                            if (seen.size >= effectiveMax) return@forEachIndexed
                             seen += it
                         }
                     }
@@ -47,7 +54,7 @@ object IpGenerator {
                 report(progress, total, i + 1)
             }
             progress(100)
-            return seen.take(MAX_FULLSCAN_TOTAL)
+            return seen.take(effectiveMax)
         }
 
         val out = mutableListOf<String>()
@@ -63,17 +70,17 @@ object IpGenerator {
             }
         } else if (maxIps > 0) {
             val budget = maxIps
+            out += bareIps.take(budget)
+            val remaining = (budget - out.size).coerceAtLeast(0)
             if (total > 0) {
-                val base = budget / total
-                val remainder = budget % total
+                val base = remaining / total
+                val remainder = remaining % total
                 networks.forEachIndexed { i, (_, net) ->
                     val quota = base + if (i < remainder) 1 else 0
                     if (quota > 0) out += net.sampleHosts(quota)
                     report(progress, total, i + 1)
                 }
             }
-            val leftover = (budget - out.size).coerceAtLeast(0)
-            out += bareIps.take(leftover)
         }
 
         progress(100)
@@ -96,6 +103,7 @@ object IpGenerator {
     private fun isValidIp(s: String): Boolean {
         if (':' in s) {
             if (s == "::") return false
+            if (IpParser.looksLikeIpv6WithPort(s)) return false
             return try {
                 val addr = InetAddress.getByName(s)
                 addr.address.size == 16 && addr.address.any { it != 0.toByte() }

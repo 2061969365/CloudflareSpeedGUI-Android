@@ -26,6 +26,7 @@ object LatencyProbe {
                 try {
                     val start = System.nanoTime()
                     socket.connect(InetSocketAddress(ip, port), timeoutMs)
+                    socket.soTimeout = timeoutMs
                     val end = System.nanoTime()
                     rtts += (end - start) / 1_000_000f
                 } catch (_: Exception) {

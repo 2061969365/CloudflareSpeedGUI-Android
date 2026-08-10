@@ -9,11 +9,18 @@ import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import okio.Buffer
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.SocketAddress
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 class SpeedProbeTest {
@@ -109,5 +116,64 @@ class SpeedProbeTest {
 
         assertNull(mbps)
         assertTrue("expected explicit read timeout to bound the call", elapsedSec < 25)
+    }
+
+    @Test
+    fun port_parameter_overrides_url_port() = runBlocking {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                streamingResponse(totalBytes = 12L * 1024 * 1024, throttleBytesPerSec = 8L * 1024 * 1024)
+        }
+        val bogusUrl = "http://localhost:1/__down"
+        val mbps = SpeedProbe.measure("127.0.0.1", server.port, bogusUrl, durationSec = 1, speedLimit = 0f)
+
+        assertNotNull("expected request to hit the server.port, not the URL's bogus port", mbps)
+        assertTrue(mbps!! > 0f)
+        assertEquals("request should have reached the scan port", 1, server.requestCount)
+    }
+
+    @Test
+    fun measure_does_not_route_through_system_proxy_selector() = runBlocking {
+        val proxyServer = MockWebServer()
+        proxyServer.start()
+        val originalSelector = ProxySelector.getDefault()
+        try {
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    streamingResponse(totalBytes = 12L * 1024 * 1024, throttleBytesPerSec = 8L * 1024 * 1024)
+            }
+            ProxySelector.setDefault(object : ProxySelector() {
+                override fun select(uri: URI): List<Proxy> =
+                    listOf(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", proxyServer.port)))
+                override fun connectFailed(uri: URI, sa: SocketAddress, ioe: IOException) {}
+            })
+            val url = server.url("/__down").toString()
+            val mbps = SpeedProbe.measure("127.0.0.1", server.port, url, durationSec = 1, speedLimit = 0f)
+
+            assertNotNull(mbps)
+            assertTrue(mbps!! > 0f)
+            assertEquals("no request should have gone through the system proxy", 0, proxyServer.requestCount)
+        } finally {
+            ProxySelector.setDefault(originalSelector)
+            proxyServer.shutdown()
+        }
+    }
+
+    @Test
+    fun short_download_read_timeout_is_duration_plus_margin() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val url = server.url("/__down").toString()
+        val start = System.nanoTime()
+        val mbps = withTimeout(30_000) {
+            SpeedProbe.measure("127.0.0.1", server.port, url, durationSec = 1, speedLimit = 0f)
+        }
+        val elapsedSec = (System.nanoTime() - start) / 1_000_000_000.0
+
+        assertNull(mbps)
+        assertTrue(
+            "1s download should time out around 1s + ${SPEED_TIMEOUT_MARGIN_MS / 1000}s margin, " +
+                "got ${elapsedSec}s (expected >= 5s to prove margin applied, < 8s to prove the 10s floor is gone)",
+            elapsedSec >= 5.0 && elapsedSec < 8.0,
+        )
     }
 }

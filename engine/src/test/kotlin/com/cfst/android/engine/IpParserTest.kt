@@ -97,4 +97,70 @@ class IpParserTest {
         assertNull(IpParser.parseCidr("10.0.0.01"))
         assertNull(IpParser.parseCidr("10.0.00.1/24"))
     }
+
+    @Test
+    fun parseCidr_ipv4_with_port_parses_as_slash32() {
+        val n = IpParser.parseCidr("1.2.3.4:443")!!
+        assertEquals(4, n.version)
+        assertEquals(32, n.prefixLen)
+        assertEquals(1L, n.numAddresses)
+        assertEquals("1.2.3.4", n.expandAll().toList().single())
+    }
+
+    @Test
+    fun parseCidr_ipv6_with_port_rejected() {
+        assertNull(IpParser.parseCidr("2606:4700::1:443"))
+    }
+
+    @Test
+    fun parseRange_start_before_end() {
+        val n = IpParser.parseRange("1.2.3.4-1.2.3.10")!!
+        assertEquals(4, n.version)
+        assertEquals(7L, n.numAddresses)
+        val all = n.expandAll().toList()
+        assertEquals(7, all.size)
+        assertEquals("1.2.3.4", all.first())
+        assertEquals("1.2.3.10", all.last())
+        assertTrue(all.contains("1.2.3.7"))
+    }
+
+    @Test
+    fun parseRange_with_spaces_around_dash() {
+        val n = IpParser.parseRange("1.2.3.4 - 1.2.3.6")!!
+        assertEquals(3L, n.numAddresses)
+        assertTrue(n.expandAll().toList().containsAll(listOf("1.2.3.4", "1.2.3.6")))
+    }
+
+    @Test
+    fun parseRange_single_ip_span() {
+        val n = IpParser.parseRange("1.2.3.4-1.2.3.4")!!
+        assertEquals(1L, n.numAddresses)
+        assertEquals(listOf("1.2.3.4"), n.expandAll().toList())
+    }
+
+    @Test
+    fun parseRange_start_after_end_uses_minmax() {
+        val n = IpParser.parseRange("1.2.3.10-1.2.3.4")!!
+        val all = n.expandAll().toList()
+        assertEquals(7, all.size)
+        assertEquals("1.2.3.4", all.first())
+        assertEquals("1.2.3.10", all.last())
+    }
+
+    @Test
+    fun parseRange_sampling_includes_endpoints() {
+        val n = IpParser.parseRange("1.2.3.4-1.2.3.10")!!
+        val sample = n.sampleHosts(7)
+        assertEquals(7, sample.size)
+        assertTrue(sample.contains("1.2.3.4"))
+        assertTrue(sample.contains("1.2.3.10"))
+        assertTrue(sample.all { it.split(".").size == 4 })
+    }
+
+    @Test
+    fun parseRange_invalid_returns_null() {
+        assertNull(IpParser.parseRange("1.2.3.4-999.1.1.1"))
+        assertNull(IpParser.parseRange("not-a-range"))
+        assertNull(IpParser.parseRange("1.2.3.4"))
+    }
 }

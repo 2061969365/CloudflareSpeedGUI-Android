@@ -201,6 +201,17 @@ class CfstEngineTest {
     }
 
     @Test
+    fun `each scan run uses unique temp files`() = runBlocking {
+        val engine = engine()
+        engine.latencyScan(listOf("1.1.1.1"), 443, 500, 2, 200f, 8, 1000) { _, _ -> }
+        engine.latencyScan(listOf("1.1.1.2"), 443, 500, 2, 200f, 8, 1000) { _, _ -> }
+        val outFiles = recordedCmds.takeLast(2).map { cmd -> cmd[cmd.indexOf("-o") + 1] }
+        val ipFiles = recordedCmds.takeLast(2).map { cmd -> cmd[cmd.indexOf("-f") + 1] }
+        assertTrue("two runs must not share output files: $outFiles", outFiles[0] != outFiles[1])
+        assertTrue("two runs must not share input files: $ipFiles", ipFiles[0] != ipFiles[1])
+    }
+
+    @Test
     fun `heartbeat reports progress while process is silent`() = runBlocking {
         val engine = engine(runnerOverride = blockingFakeRunner())
         val progress = mutableListOf<Pair<Int, Int>>()

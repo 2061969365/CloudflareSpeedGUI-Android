@@ -5,6 +5,7 @@ import kotlinx.coroutines.delay
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.InputStreamReader
 import kotlin.coroutines.coroutineContext
 
 class CfstProcessRunner(
@@ -39,10 +40,13 @@ class CfstProcessRunner(
             }
         } finally {
             cancellationHandle.dispose()
-            reader.join(JOIN_TIMEOUT_MS)
+            // Kill the process BEFORE joining the reader: destroying closes the stdout pipe,
+            // which unblocks the reader thread's read() so join returns quickly instead of
+            // blocking for the full JOIN_TIMEOUT_MS on a live process.
             if (process.isAlive) {
                 destroyForciblyAndWait(process)
             }
+            reader.join(JOIN_TIMEOUT_MS)
         }
     }
 
@@ -75,13 +79,17 @@ class CfstProcessRunner(
         onProgress: (Pair<Int, Int>) -> Unit,
         onLine: (String) -> Unit,
     ) {
-        val buffer = ByteArray(READ_BUFFER_SIZE)
+        // InputStreamReader carries UTF-8 decoder state across reads, so a multi-byte
+        // character split across chunk boundaries decodes correctly (per-chunk String(bytes)
+        // decoding would corrupt it into U+FFFD and break Chinese progress parsing).
+        val reader = InputStreamReader(input, Charsets.UTF_8)
+        val buffer = CharArray(READ_BUFFER_SIZE)
         val pending = StringBuilder()
         try {
             while (true) {
-                val read = input.read(buffer)
+                val read = reader.read(buffer)
                 if (read < 0) break
-                pending.append(String(buffer, 0, read, Charsets.UTF_8))
+                pending.append(buffer, 0, read)
                 emitCompleteSegments(pending, onProgress, onLine)
             }
             if (pending.isNotEmpty()) {

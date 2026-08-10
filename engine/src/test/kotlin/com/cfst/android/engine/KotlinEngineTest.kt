@@ -2,11 +2,19 @@ package com.cfst.android.engine
 
 import com.cfst.android.engine.model.LatencyStats
 import com.cfst.android.engine.model.ScanResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class KotlinEngineTest {
 
@@ -142,6 +150,100 @@ class KotlinEngineTest {
             onProgress = { _, _ -> },
         )
         assertEquals(4321, capturedTimeout)
+    }
+
+    @Test
+    fun latencyScan_cancel_returns_promptly_and_stops_stale_progress() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val latencyProbe = { _: String, _: Int, _: Int, _: Int ->
+            started.complete(Unit)
+            Thread.sleep(300)
+            LatencyStats(1, 1, 0f, 5f, 5f, 5f)
+        }
+        val engine = KotlinEngine(
+            latencyProbe = latencyProbe,
+            speedProbe = { _, _, _, _, _ -> 1f },
+            dispatcher = Dispatchers.Default,
+        )
+        val cancelled = AtomicBoolean(false)
+        val progressAfterCancel = AtomicInteger(0)
+        val ips = (1..5).map { "10.0.0.$it" }
+        val job = async {
+            engine.latencyScan(
+                ips = ips,
+                port = 443,
+                probeCount = ips.size,
+                pingCount = 2,
+                latencyLimit = 100f,
+                concurrency = 2,
+                pingTimeoutMs = 2000,
+                onProgress = { _, _ ->
+                    if (cancelled.get()) progressAfterCancel.incrementAndGet()
+                },
+            )
+        }
+
+        assertTrue("first probe should start", withTimeoutOrNull(5_000) { started.await() } != null)
+        delay(50)
+        cancelled.set(true)
+        val cancelStart = System.nanoTime()
+        job.cancel()
+        val outcome = runCatching { job.await() }
+        val cancelMs = (System.nanoTime() - cancelStart) / 1_000_000
+
+        assertTrue(
+            "scan should have been cancelled, not completed normally: ${outcome.exceptionOrNull()}",
+            outcome.exceptionOrNull() is CancellationException,
+        )
+        assertEquals("no progress should be reported after cancellation", 0, progressAfterCancel.get())
+        assertTrue("cancel took ${cancelMs}ms, expected well under total scan time", cancelMs < 5000)
+    }
+
+    @Test
+    fun speedScan_cancel_returns_promptly_and_stops_stale_progress() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val speedProbe = { _: String, _: Int, _: String, _: Int, _: Float ->
+            started.complete(Unit)
+            Thread.sleep(300)
+            2f
+        }
+        val engine = KotlinEngine(
+            latencyProbe = { _, _, _, _ -> LatencyStats(1, 1, 0f, 5f, 5f, 5f) },
+            speedProbe = speedProbe,
+            dispatcher = Dispatchers.Default,
+        )
+        val cancelled = AtomicBoolean(false)
+        val progressAfterCancel = AtomicInteger(0)
+        val ips = (1..5).map { "10.0.0.$it" }
+        val job = async {
+            engine.speedScan(
+                ips = ips,
+                port = 443,
+                url = "https://example.com/file",
+                downloadTime = 2,
+                downloadCount = ips.size,
+                speedLimit = 0f,
+                concurrency = 2,
+                onProgress = { _, _ ->
+                    if (cancelled.get()) progressAfterCancel.incrementAndGet()
+                },
+            )
+        }
+
+        assertTrue("first probe should start", withTimeoutOrNull(5_000) { started.await() } != null)
+        delay(50)
+        cancelled.set(true)
+        val cancelStart = System.nanoTime()
+        job.cancel()
+        val outcome = runCatching { job.await() }
+        val cancelMs = (System.nanoTime() - cancelStart) / 1_000_000
+
+        assertTrue(
+            "scan should have been cancelled, not completed normally: ${outcome.exceptionOrNull()}",
+            outcome.exceptionOrNull() is CancellationException,
+        )
+        assertEquals("no progress should be reported after cancellation", 0, progressAfterCancel.get())
+        assertTrue("cancel took ${cancelMs}ms, expected well under total scan time", cancelMs < 5000)
     }
 
     @Test

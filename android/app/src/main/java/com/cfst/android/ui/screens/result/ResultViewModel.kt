@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -46,7 +47,9 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
     val uiState: StateFlow<ResultUiState> =
         combine(container.lastResults, _filterState, _refreshTick) { results, filter, _ ->
             computeState(results, filter)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ResultUiState())
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ResultUiState())
 
     private val _isRefreshing = MutableStateFlow(false)
 
@@ -79,17 +82,17 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun copyAll(context: Context) {
-        val results = uiState.value.filteredResults
+        val results = uiState.value.results
         if (results.isEmpty()) {
             toast(context, "暂无结果可复制")
             return
         }
         clipboardPut(context, ResultFormatter.formatCopyLines(results))
-        toast(context, "已复制 ${results.size} 条结果")
+        toast(context, "已复制全部 ${results.size} 条结果")
     }
 
     fun exportCsv(context: Context, uri: Uri) {
-        val results = uiState.value.filteredResults
+        val results = uiState.value.results
         if (results.isEmpty()) {
             toast(context, "暂无结果可导出")
             return
@@ -105,7 +108,7 @@ class ResultViewModel(application: Application) : AndroidViewModel(application) 
                 }.isSuccess
             }
             if (ok) {
-                toast(context, "已导出 ${results.size} 条结果")
+                toast(context, "已导出全部 ${results.size} 条结果")
             } else {
                 toast(context, "导出失败")
             }

@@ -69,6 +69,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     private var sourceBeforeCustom: IpSource? = null
     private var lastResults: List<ScanResult> = emptyList()
+    private var cancelRequested = false
 
     init {
         val restored = ScanService.scanStatus.value
@@ -107,6 +108,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
+        cancelRequested = false
         _uiState.update {
             it.copy(
                 running = true,
@@ -124,12 +126,18 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         ScanService.scanStatus.value = ScanStatus(running = true, phase = "生成IP列表", progress = 0)
         viewModelScope.launch {
             lastResults = emptyList()
-            val request = withContext(Dispatchers.IO) { buildScanRequest() }
             val app = getApplication<Application>()
             ContextCompat.startForegroundService(
                 app,
                 Intent(app, ScanService::class.java).setAction(ScanService.ACTION_START),
             )
+            val request = withContext(Dispatchers.IO) { buildScanRequest() }
+            if (cancelRequested) {
+                cancelRequested = false
+                ScanService.scanStatus.value = ScanStatus()
+                _uiState.update { it.copy(running = false, phase = "就绪", progress = 0) }
+                return@launch
+            }
             controller.start(request)
         }
     }
@@ -137,6 +145,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     fun quickTest(ip: String, port: Int) {
         if (_uiState.value.running) return
         if (ScanService.scanStatus.value.running) return
+        cancelRequested = false
         _uiState.update {
             it.copy(
                 running = true,
@@ -154,6 +163,11 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         ScanService.scanStatus.value = ScanStatus(running = true, phase = "生成IP列表", progress = 0)
         viewModelScope.launch {
             lastResults = emptyList()
+            val app = getApplication<Application>()
+            ContextCompat.startForegroundService(
+                app,
+                Intent(app, ScanService::class.java).setAction(ScanService.ACTION_START),
+            )
             val request = withContext(Dispatchers.IO) {
                 buildScanRequest(overrideLines = listOf(ip.trim()))
             }.copy(
@@ -165,16 +179,18 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 speedEnabled = true,
                 region = "全部",
             )
-            val app = getApplication<Application>()
-            ContextCompat.startForegroundService(
-                app,
-                Intent(app, ScanService::class.java).setAction(ScanService.ACTION_START),
-            )
+            if (cancelRequested) {
+                cancelRequested = false
+                ScanService.scanStatus.value = ScanStatus()
+                _uiState.update { it.copy(running = false, phase = "就绪", progress = 0, quickIp = null) }
+                return@launch
+            }
             controller.start(request)
         }
     }
 
     fun cancelScan() {
+        cancelRequested = true
         controller.cancel()
     }
 
@@ -280,12 +296,18 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun buildScanRequest(overrideLines: List<String>? = null): ScanRequest {
         val state = _uiState.value
-        val persisted = container.configRepository.flow.first()
+        val persisted = runCatching { container.configRepository.flow.first() }
+            .getOrElse { emptyMap() }
         val customLines = overrideLines ?: when (state.source) {
             IpSource.OFFICIAL, IpSource.CMIP -> container.assetIpLines(state.source)
             IpSource.CUSTOM -> state.customLines
         }
         val persistedUrl = persisted["downloadUrl"] as? String
+        val pingConcurrency = intOf(persisted, "pingConcurrency", 200)
+        val speedConcurrency = intOf(persisted, "speedConcurrency", 5)
+        _uiState.update {
+            it.copy(pingConcurrency = pingConcurrency, speedConcurrency = speedConcurrency)
+        }
         return ScanRequest(
             source = state.source,
             customLines = customLines,
@@ -309,8 +331,8 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             },
             pingCount = intOf(persisted, "pingCount", 2),
             pingTimeoutMs = 2000,
-            pingConcurrency = state.pingConcurrency,
-            speedConcurrency = state.speedConcurrency,
+            pingConcurrency = pingConcurrency,
+            speedConcurrency = speedConcurrency,
         )
     }
 
@@ -328,7 +350,6 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                     progress = event.pct.coerceIn(0, 100),
                     phase = event.text,
                     etaMs = event.etaMs,
-                    totalScanned = if (event.total > 0) event.done else it.totalScanned,
                 )
             }
             is ScanEvent.Log -> {

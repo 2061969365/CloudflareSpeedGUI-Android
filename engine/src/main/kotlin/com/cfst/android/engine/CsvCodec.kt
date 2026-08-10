@@ -165,6 +165,7 @@ object CsvCodec {
             i++
         }
         if (sb.isNotEmpty()) lines.add(sb.toString().trimEnd('\r'))
+        if (lines.isNotEmpty()) lines[0] = lines[0].removePrefix("\uFEFF")
         return lines
     }
 }

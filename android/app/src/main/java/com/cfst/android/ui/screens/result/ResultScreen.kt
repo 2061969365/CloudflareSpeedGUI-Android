@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -150,6 +151,7 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            val hScroll = rememberScrollState()
             val pullRefreshState = rememberPullToRefreshState()
 
             PullToRefreshBox(
@@ -162,7 +164,7 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                 item(key = "header") {
                     Row(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .horizontalScroll(hScroll)
                             .padding(vertical = 4.dp),
                     ) {
                         if (editing) {
@@ -170,37 +172,37 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                         }
                         Text(
                             text = "IP 地址",
-                            modifier = Modifier.width(110.dp),
+                            modifier = Modifier.width(130.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
                             text = "端口",
-                            modifier = Modifier.width(48.dp),
+                            modifier = Modifier.width(56.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
                             text = "延迟",
-                            modifier = Modifier.width(64.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            text = "丢包",
-                            modifier = Modifier.width(64.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            text = "速度",
                             modifier = Modifier.width(72.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
+                            text = "丢包",
+                            modifier = Modifier.width(72.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = "速度",
+                            modifier = Modifier.width(88.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
                             text = "地区",
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.width(96.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -211,6 +213,7 @@ fun ResultScreen(modifier: Modifier = Modifier) {
                         result = result,
                         editing = editing,
                         selected = rowKeyOf(result) in selectedIps,
+                        hScroll = hScroll,
                         onToggleSelect = { vm.toggleSelect(result.ip, result.port) },
                         onCopy = { vm.copyRow(context, result) },
                     )
@@ -272,12 +275,13 @@ private fun ResultRow(
     result: ScanResult,
     editing: Boolean,
     selected: Boolean,
+    hScroll: ScrollState,
     onToggleSelect: () -> Unit,
     onCopy: () -> Unit,
 ) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
+            .horizontalScroll(hScroll)
             .then(
                 if (selected) {
                     Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
@@ -300,34 +304,34 @@ private fun ResultRow(
         }
         Text(
             text = result.ip,
-            modifier = Modifier.width(110.dp),
+            modifier = Modifier.width(130.dp),
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
             text = result.port.toString(),
-            modifier = Modifier.width(48.dp),
+            modifier = Modifier.width(56.dp),
             style = MaterialTheme.typography.bodySmall,
         )
         Text(
             text = formatLatency(result.avgMs),
-            modifier = Modifier.width(64.dp),
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Text(
-            text = formatLoss(result.lossPct),
-            modifier = Modifier.width(64.dp),
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Text(
-            text = formatSpeed(result.speed),
             modifier = Modifier.width(72.dp),
             style = MaterialTheme.typography.bodySmall,
         )
         Text(
+            text = formatLoss(result.lossPct),
+            modifier = Modifier.width(72.dp),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = formatSpeed(result.speed),
+            modifier = Modifier.width(88.dp),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
             text = formatRegion(result),
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.width(96.dp),
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

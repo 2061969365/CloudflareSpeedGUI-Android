@@ -6,7 +6,10 @@ import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.InetAddress
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
+
+const val SPEED_TIMEOUT_MARGIN_MS = 5_000L
 
 object SpeedProbe {
 
@@ -15,17 +18,24 @@ object SpeedProbe {
     suspend fun measure(ip: String, port: Int, url: String, durationSec: Int, speedLimit: Float): Float? =
         withContext(Dispatchers.IO) {
             if (durationSec <= 0) return@withContext null
-            val timeoutSec = maxOf(durationSec, 10)
+            val timeoutSec = durationSec + SPEED_TIMEOUT_MARGIN_MS / 1000
             val client = OkHttpClient.Builder()
-                .connectTimeout(timeoutSec.toLong(), TimeUnit.SECONDS)
-                .readTimeout(timeoutSec.toLong(), TimeUnit.SECONDS)
+                .connectTimeout(timeoutSec, TimeUnit.SECONDS)
+                .readTimeout(timeoutSec, TimeUnit.SECONDS)
+                .proxy(Proxy.NO_PROXY)
                 .dns(object : Dns {
                     override fun lookup(hostname: String): List<InetAddress> =
                         listOf(InetAddress.getByName(ip))
                 })
                 .build()
             try {
-                val request = Request.Builder().url(url).build()
+                val request = Request.Builder()
+                    .url(url)
+                    .let { builder ->
+                        val u = builder.build().url
+                        builder.url(u.newBuilder().port(port).build())
+                    }
+                    .build()
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         return@withContext null

@@ -37,6 +37,7 @@ class ScanController(
         val previous = scope
         val myEpoch = ++epoch
         previous?.cancel()
+        events.resetReplayCache()
         val newScope = CoroutineScope(SupervisorJob() + dispatcher)
         scope = newScope
         newScope.launch {
@@ -96,15 +97,15 @@ class ScanController(
             emit(ScanEvent.Done)
         } catch (e: CancellationException) {
             if (epoch == myEpoch) {
-                emit(ScanEvent.Log("已取消"))
-                emit(ScanEvent.Cancelled)
-                emit(ScanEvent.Done)
+                events.tryEmit(ScanEvent.Log("已取消"))
+                events.tryEmit(ScanEvent.Cancelled)
+                events.tryEmit(ScanEvent.Done)
             }
         } catch (e: Exception) {
             if (epoch == myEpoch) {
-                emit(ScanEvent.Log("错误: ${e.message}"))
-                emit(ScanEvent.Error(e.message ?: "未知错误"))
-                emit(ScanEvent.Done)
+                events.tryEmit(ScanEvent.Log("错误: ${e.message}"))
+                events.tryEmit(ScanEvent.Error(e.message ?: "未知错误"))
+                events.tryEmit(ScanEvent.Done)
             }
         }
     }
@@ -193,11 +194,15 @@ class ScanController(
                 .sortedBy { it.avgMs ?: Float.MAX_VALUE }
                 .take(req.speedCount)
         }
+        val sorted = survivors.sortedBy { it.avgMs ?: Float.MAX_VALUE }
+        val window = sorted.take(maxOf(req.speedCount * 2, 256))
         val resolved = Collections.synchronizedMap(mutableMapOf<String, ScanResult>())
         val concurrency = minOf(maxOf(1, req.pingConcurrency), 16)
         val limited = dispatcher.limitedParallelism(concurrency)
+        val matched = AtomicInteger(0)
         coroutineScope {
-            for (rec in survivors) {
+            for (rec in window) {
+                if (matched.get() >= req.speedCount) break
                 launch(limited) {
                     currentCoroutineContext().ensureActive()
                     val code = rec.regionCode.takeIf { it.isNotBlank() }
@@ -219,6 +224,7 @@ class ScanController(
                                 (candidate.avgMs ?: Float.MAX_VALUE) < (existing.avgMs ?: Float.MAX_VALUE)
                             ) {
                                 resolved[candidate.ip] = candidate
+                                matched.incrementAndGet()
                             }
                         }
                     }
@@ -243,7 +249,8 @@ class ScanController(
             emit(ScanEvent.Log("测速组 $idx/${grouped.size} 端口 $port (${group.size} 个 IP)"))
             val concurrency = maxOf(1, req.speedConcurrency)
             val batches = ceil(group.size / concurrency.toDouble()).toLong()
-            val groupTimeoutMs = maxOf(60_000L, batches * req.downloadTime * 1500L + 30_000L)
+            // +5s per batch = SPEED_TIMEOUT_MARGIN_MS(5000)/1000, giving slow networks room per batch
+            val groupTimeoutMs = maxOf(60_000L, batches * (req.downloadTime + 5) * 1000L + 30_000L)
             val sped = withTimeoutOrNull(groupTimeoutMs) {
                 engine.speedScan(
                     ips = group.map { it.ip },

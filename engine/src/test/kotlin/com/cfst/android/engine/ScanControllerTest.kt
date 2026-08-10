@@ -359,4 +359,146 @@ class ScanControllerTest {
         assertTrue(collected.any { it is ScanEvent.ResultReady })
         assertTrue(collected.any { it is ScanEvent.Done })
     }
+
+    @Test
+    fun newSubscriberAfterStartReceivesFreshScanEventsNotStaleTerminal() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val controller = ScanController(
+            engine = KotlinEngine(
+                latencyProbe = { _, _, _, _ ->
+                    delay(100)
+                    LatencyStats(2, 2, 0f, 50f, 50f, 50f)
+                },
+                speedProbe = { _, _, _, _, _ -> 12.5f },
+                dispatcher = dispatcher,
+            ),
+            regionResolver = { _, _ -> null },
+            dispatcher = dispatcher,
+        )
+        val firstCollected = collectEvents(controller, dispatcher)
+        controller.start(baseRequest())
+        advanceUntilIdle()
+        assertTrue(firstCollected.any { it is ScanEvent.Done })
+
+        controller.start(baseRequest())
+        runCurrent()
+        val secondCollected = collectEvents(controller, dispatcher)
+        advanceUntilIdle()
+
+        assertTrue(secondCollected.isNotEmpty())
+        assertTrue(secondCollected.any { it is ScanEvent.ResultReady })
+        val firstDoneIdx = secondCollected.indexOfFirst { it is ScanEvent.Done }
+        assertEquals(secondCollected.lastIndex, firstDoneIdx)
+    }
+
+    @Test
+    fun cancelDeliversTerminalEventsDespiteBackpressure() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val controller = ScanController(
+            engine = KotlinEngine(
+                latencyProbe = { _, _, _, _ ->
+                    delay(Long.MAX_VALUE)
+                    LatencyStats(2, 2, 0f, 50f, 50f, 50f)
+                },
+                speedProbe = { _, _, _, _, _ -> 12.5f },
+                dispatcher = dispatcher,
+            ),
+            regionResolver = { _, _ -> null },
+            dispatcher = dispatcher,
+        )
+        val collected = mutableListOf<ScanEvent>()
+        val slowConsumer = CoroutineScope(SupervisorJob() + dispatcher).launch {
+            controller.events.collect { e ->
+                collected.add(e)
+                delay(1)
+            }
+        }
+        controller.start(baseRequest())
+        runCurrent()
+        repeat(100) { controller.events.tryEmit(ScanEvent.Log("noise $it")) }
+        controller.cancel()
+        advanceUntilIdle()
+
+        assertTrue(collected.any { it is ScanEvent.Log && it.line == "已取消" })
+        assertTrue(collected.any { it is ScanEvent.Cancelled })
+        assertTrue(collected.any { it is ScanEvent.Done })
+        slowConsumer.cancel()
+    }
+
+    @Test
+    fun selectSpeedTargetsHasCapAndEarlyStop() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val customLines = (1..8).flatMap { a -> (1..250).map { b -> "1.1.$a.$b" } }
+        var resolverCalls = 0
+        val speedCount = 5
+        val controller = ScanController(
+            engine = KotlinEngine(
+                latencyProbe = { ip, _, _, _ ->
+                    val avg = ip.substringAfterLast('.').toFloat()
+                    LatencyStats(2, 2, 0f, avg, avg, avg)
+                },
+                speedProbe = { _, _, _, _, _ -> 12.5f },
+                dispatcher = dispatcher,
+            ),
+            regionResolver = { ip, _ ->
+                resolverCalls++
+                val n = ip.substringAfterLast('.').toInt()
+                if (n <= 5) "HKG" else "LAX"
+            },
+            dispatcher = dispatcher,
+        )
+        val collected = collectEvents(controller, dispatcher)
+        controller.start(
+            baseRequest(
+                customLines = customLines,
+                speedEnabled = true,
+                region = "HKG",
+                speedCount = speedCount,
+                latencyLimit = 100_000f,
+            )
+        )
+        advanceUntilIdle()
+
+        val cap = maxOf(speedCount * 2, 256)
+        assertTrue("resolverCalls=$resolverCalls should be <= $cap", resolverCalls <= cap)
+        val ready = collected.filterIsInstance<ScanEvent.ResultReady>().single()
+        assertEquals(speedCount, ready.results.size)
+        assertTrue(ready.results.all { it.regionCode == "HKG" })
+        assertTrue(collected.any { it is ScanEvent.Done })
+    }
+
+    @Test
+    fun watchdogDoesNotKillLargeGroupWithTinyDownloadTime() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val customLines = (1..40).map { "1.1.1.$it" }
+        val controller = ScanController(
+            engine = KotlinEngine(
+                latencyProbe = { _, _, _, _ -> LatencyStats(2, 2, 0f, 50f, 50f, 50f) },
+                speedProbe = { _, _, _, _, _ ->
+                    delay(80_000)
+                    20f
+                },
+                dispatcher = dispatcher,
+            ),
+            regionResolver = { _, _ -> null },
+            dispatcher = dispatcher,
+        )
+        val collected = collectEvents(controller, dispatcher)
+        controller.start(
+            baseRequest(
+                customLines = customLines,
+                speedEnabled = true,
+                downloadTime = 1,
+                downloadCount = 1,
+                speedConcurrency = 2,
+            )
+        )
+        advanceUntilIdle()
+
+        assertFalse(collected.any { it is ScanEvent.Log && it.line.contains("超时，跳过") })
+        val ready = collected.filterIsInstance<ScanEvent.ResultReady>().single()
+        assertEquals(40, ready.results.size)
+        assertTrue(ready.results.all { it.speed == 20f })
+        assertTrue(collected.any { it is ScanEvent.Done })
+    }
 }

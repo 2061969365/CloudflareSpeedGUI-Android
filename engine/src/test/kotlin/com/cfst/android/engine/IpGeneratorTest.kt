@@ -124,4 +124,60 @@ class IpGeneratorTest {
         assertFalse("leading-zero octet must be rejected", ips.contains("01.2.3.4"))
         assertTrue(ips.contains("1.1.1.1"))
     }
+
+    @Test
+    fun fullScan_respects_max_ips() {
+        val ips = IpGenerator.generate(listOf("10.0.0.0/24", "10.0.1.0/24"), 100, true, ::noop)
+        assertTrue("full scan must be capped at maxIps", ips.size in 1..100)
+        assertTrue(ips.isNotEmpty())
+    }
+
+    @Test
+    fun fullScan_maxIps_zero_keeps_ceiling() {
+        val ips = IpGenerator.generate(listOf("0.0.0.0/0"), 0, true, ::noop)
+        assertTrue("full scan with maxIps=0 must not explode", ips.size < 2_000_001)
+    }
+
+    @Test
+    fun ip_port_line_treated_as_bare_ip() {
+        val ips = IpGenerator.generate(listOf("1.2.3.4:443", "2.2.2.2:8080"), 0, false, ::noop)
+        assertTrue(ips.contains("1.2.3.4"))
+        assertTrue(ips.contains("2.2.2.2"))
+        assertFalse("IP:port must be stripped to a bare IP", ips.any { ':' in it })
+    }
+
+    @Test
+    fun range_line_accepted_as_network() {
+        val ips = IpGenerator.generate(listOf("1.2.3.4-1.2.3.10"), 0, false, ::noop)
+        assertEquals(1, ips.size)
+        val ip = ips.single()
+        assertTrue(
+            "sampled host must be inside the range",
+            ip in listOf("1.2.3.4", "1.2.3.5", "1.2.3.6", "1.2.3.7", "1.2.3.8", "1.2.3.9", "1.2.3.10"),
+        )
+    }
+
+    @Test
+    fun mixed_port_and_range_lines_quantity() {
+        val ips = IpGenerator.generate(listOf("1.2.3.4:443", "5.6.7.8-5.6.7.10"), 0, false, ::noop)
+        assertEquals(2, ips.size)
+        assertTrue(ips.contains("1.2.3.4"))
+        val sampled = ips.first { it != "1.2.3.4" }
+        assertTrue(sampled in listOf("5.6.7.8", "5.6.7.9", "5.6.7.10"))
+    }
+
+    @Test
+    fun explicit_bare_ips_prioritized_over_network_quota() {
+        val ips = IpGenerator.generate(listOf("1.1.1.1", "2.2.2.2", "173.245.48.0/20"), 5, false, ::noop)
+        assertTrue("explicit bare IP must survive network quota", ips.contains("1.1.1.1"))
+        assertTrue("explicit bare IP must survive network quota", ips.contains("2.2.2.2"))
+        assertTrue(ips.distinct().size <= 5)
+    }
+
+    @Test
+    fun ipv6_with_port_not_accepted_as_bare_ip() {
+        val ips = IpGenerator.generate(listOf("2606:4700::1:443", "2606:4700::1"), 0, false, ::noop)
+        assertFalse("IPv6:port must not be treated as a bare IP", ips.contains("2606:4700::1:443"))
+        assertTrue(ips.contains("2606:4700::1"))
+    }
 }

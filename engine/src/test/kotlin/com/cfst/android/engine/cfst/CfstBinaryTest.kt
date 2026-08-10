@@ -36,7 +36,20 @@ class CfstBinaryTest {
     @Test
     fun latencyLimit_truncated_to_int_for_go_flag() {
         val cmd = CfstBinary.latencyCmd("ips.txt", 443, 300, 4, 200.5f, "out.csv")
-        assertEquals("200", cmd[cmd.indexOf("-tl") + 1])
+        assertEquals("201", cmd[cmd.indexOf("-tl") + 1])
+    }
+
+    @Test
+    fun latencyLimit_fractional_rounds_not_truncates() {
+        // 0.9 rounds to 1 (truncation would produce -tl 0 == "no limit", silently ignoring the filter)
+        assertEquals("1", tlArg(0.9f))
+        assertEquals("200", tlArg(199.9f))
+        assertEquals("0", tlArg(0f))
+    }
+
+    private fun tlArg(latencyLimit: Float): String {
+        val cmd = CfstBinary.latencyCmd("ips.txt", 443, 300, 4, latencyLimit, "out.csv")
+        return cmd[cmd.indexOf("-tl") + 1]
     }
 
     @Test

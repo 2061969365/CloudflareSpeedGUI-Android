@@ -47,6 +47,7 @@ class KotlinEngine(
                     } catch (_: Exception) {
                         null
                     }
+                    currentCoroutineContext().ensureActive()
                     onProgress(completed.incrementAndGet(), total)
                     if (stats?.avgMs != null && (latencyLimit <= 0f || stats.avgMs <= latencyLimit)) {
                         results.add(
@@ -95,6 +96,7 @@ class KotlinEngine(
                     } catch (_: Exception) {
                         null
                     }
+                    currentCoroutineContext().ensureActive()
                     speeds[ip] = speed
                     onProgress(completed.incrementAndGet(), total)
                 }

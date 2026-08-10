@@ -47,8 +47,9 @@ class CfstEngine(
     ): List<ScanResult> {
         val bin = binaryPath() ?: throw IllegalStateException("cfst binary unavailable")
         val dir = workDir()
-        val ipFile = File(dir, "latency-ips.txt")
-        val outCsv = File(dir, "latency-$port.csv")
+        val runId = newRunId()
+        val ipFile = File(dir, "latency-ips-$runId.txt")
+        val outCsv = File(dir, "latency-$port-$runId.csv")
         withContext(Dispatchers.IO) {
             ipFile.delete()
             outCsv.delete()
@@ -94,7 +95,9 @@ class CfstEngine(
             }
         }
         if (exit != 0) throw IllegalStateException("cfst latency scan failed with exit code $exit")
-        return readCsv(outCsv, port, staleBefore = startTs).filter { it.avgMs != null }
+        val result = readCsv(outCsv, port, staleBefore = startTs).filter { it.avgMs != null }
+        cleanupTempFiles(ipFile, outCsv)
+        return result
     }
 
     override suspend fun speedScan(
@@ -109,8 +112,9 @@ class CfstEngine(
     ): List<ScanResult> {
         val bin = binaryPath() ?: throw IllegalStateException("cfst binary unavailable")
         val dir = workDir()
-        val ipFile = File(dir, "speed-ips.txt")
-        val outCsv = File(dir, "speed-$port.csv")
+        val runId = newRunId()
+        val ipFile = File(dir, "speed-ips-$runId.txt")
+        val outCsv = File(dir, "speed-$port-$runId.csv")
         withContext(Dispatchers.IO) {
             ipFile.delete()
             outCsv.delete()
@@ -157,7 +161,9 @@ class CfstEngine(
             }
         }
         if (exit != 0) throw IllegalStateException("cfst speed scan failed with exit code $exit")
-        return readCsv(outCsv, port, staleBefore = startTs).filter { it.speed != null && it.speed > 0f }
+        val result = readCsv(outCsv, port, staleBefore = startTs).filter { it.speed != null && it.speed > 0f }
+        cleanupTempFiles(ipFile, outCsv)
+        return result
     }
 
     private suspend fun writeIps(file: File, ips: List<String>) = withContext(Dispatchers.IO) {
@@ -171,7 +177,15 @@ class CfstEngine(
             CfstCsvParser.parse(file.readText(), port, System.currentTimeMillis())
         }
 
+    private suspend fun cleanupTempFiles(vararg files: File) = withContext(Dispatchers.IO) {
+        files.forEach { runCatching { it.delete() } }
+    }
+
+    private fun newRunId(): String =
+        "${System.nanoTime().toString(16)}-${RUN_SEQ.incrementAndGet()}"
+
     companion object {
         private const val HEARTBEAT_INTERVAL_MS = 2_000L
+        private val RUN_SEQ = java.util.concurrent.atomic.AtomicInteger(0)
     }
 }

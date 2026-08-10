@@ -40,6 +40,7 @@ class ScanService : Service() {
     private var watchdogJob: Job? = null
     private var receivedEvent = false
     private var lastResultCount = 0
+    private var lastPct = 0
     private var lastNotifyAt = 0L
 
     override fun onCreate() {
@@ -73,6 +74,7 @@ class ScanService : Service() {
         watchdogJob?.cancel()
         receivedEvent = false
         lastResultCount = 0
+        lastPct = 0
         lastNotifyAt = 0L
         scanStatus.value = ScanStatus(running = true, phase = "正在准备…", progress = 0)
         collectorJob = serviceScope.launch {
@@ -91,19 +93,20 @@ class ScanService : Service() {
         receivedEvent = true
         when (event) {
             is ScanEvent.Progress -> {
+                lastPct = event.pct.coerceIn(0, 100)
                 scanStatus.update {
-                    it.copy(phase = event.text, progress = event.pct.coerceIn(0, 100))
+                    it.copy(phase = event.text, progress = lastPct)
                 }
                 val etaText = event.etaMs?.let { "（预计 ${it / 1000}s 剩余）" } ?: ""
-                notifyThrottled(event.pct, "${event.text}$etaText")
+                notifyThrottled(lastPct, "${event.text}$etaText")
             }
             is ScanEvent.PhaseChanged -> {
                 scanStatus.update { it.copy(phase = event.phase) }
-                notifier.notifyProgress(0, event.phase)
+                notifyThrottled(lastPct, event.phase)
             }
             is ScanEvent.Log -> {
                 scanStatus.update { it.copy(phase = event.line) }
-                notifyThrottled(0, event.line)
+                notifyThrottled(lastPct, event.line)
             }
             is ScanEvent.ResultReady -> {
                 lastResultCount = event.results.size
@@ -113,12 +116,12 @@ class ScanService : Service() {
                 scanStatus.value = ScanStatus(running = false, phase = "错误", progress = 0)
                 notifier.notifyProgress(0, "扫描失败：${event.message}")
                 (application as CfApp).container.scanController.cancel()
-                stopScan()
+                stopScan(resetStatus = false)
             }
             ScanEvent.Cancelled -> {
                 scanStatus.value = ScanStatus(running = false, phase = "已取消", progress = 0)
                 notifier.notifyProgress(0, "已取消")
-                stopScan()
+                stopScan(resetStatus = false)
             }
             ScanEvent.Done -> {
                 scanStatus.value = ScanStatus(
@@ -127,9 +130,9 @@ class ScanService : Service() {
                     progress = 0,
                     finishedWithResults = lastResultCount > 0,
                 )
-                notifier.notifyProgress(0, "扫描完成")
+                notifier.notifyProgress(if (lastResultCount > 0) 100 else lastPct, "扫描完成")
                 (application as CfApp).container.scanController.cancel()
-                stopScan()
+                stopScan(resetStatus = false)
             }
         }
     }
@@ -147,14 +150,16 @@ class ScanService : Service() {
         stopScan()
     }
 
-    private fun stopScan() {
+    private fun stopScan(resetStatus: Boolean = true) {
         notifier.cancel()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        if (resetStatus) scanStatus.value = ScanStatus()
         stopSelf()
     }
 
     override fun onDestroy() {
         serviceScope.cancel()
+        if (scanStatus.value.running) scanStatus.value = ScanStatus()
         wakeLock?.let {
             if (it.isHeld) it.release()
         }

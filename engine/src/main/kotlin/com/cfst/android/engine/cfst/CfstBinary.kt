@@ -1,5 +1,7 @@
 package com.cfst.android.engine.cfst
 
+import kotlin.math.roundToInt
+
 object CfstBinary {
 
     const val DEFAULT_SPEED_URL = "https://speed.hatexianyu.ccwu.cc/?bytes=209715200"
@@ -46,7 +48,9 @@ object CfstBinary {
         "-httping",
         // -dd locks flag/output semantics to CloudflareSpeedTest v2.3.5; newer versions may change arg handling.
         "-dd",
-        "-tl", latencyLimit.toInt().toString(),
+        // cfst's -tl only accepts integers; round (not truncate) so 0.9 -> 1 instead of
+        // being silently treated as "no limit" (0).
+        "-tl", latencyLimit.roundToInt().toString(),
         "-url", if (url.isBlank()) DEFAULT_SPEED_URL else url,
         "-p", "0",
         "-o", outCsv,

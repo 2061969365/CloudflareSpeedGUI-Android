@@ -135,27 +135,83 @@ object IpParser {
         val trimmed = s.trim()
         if (trimmed.isEmpty()) return null
         val slash = trimmed.lastIndexOf('/')
-        return if (slash < 0) {
-            parseV4(trimmed, 32) ?: parseV6(trimmed, 128)
-        } else {
-            val addr = trimmed.substring(0, slash).trim()
-            val prefix = trimmed.substring(slash + 1).trim().toIntOrNull() ?: return null
-            parseV4(addr, prefix) ?: parseV6(addr, prefix)
+        if (slash < 0) {
+            if (looksLikeIpv6WithPort(trimmed)) return null
+            parseV4WithPort(trimmed)?.let { return it }
+            return parseV4(trimmed, 32) ?: parseV6(trimmed, 128)
         }
+        val addr = trimmed.substring(0, slash).trim()
+        val prefix = trimmed.substring(slash + 1).trim().toIntOrNull() ?: return null
+        if (looksLikeIpv6WithPort(addr)) return null
+        return parseV4(addr, prefix) ?: parseV6(addr, prefix)
     }
 
-    private fun parseV4(addr: String, prefix: Int): IpNetwork? {
-        if (prefix !in 0..32) return null
-        val octets = addr.split('.')
-        if (octets.size != 4) return null
-        var value = 0L
+    fun parseRange(s: String): IpNetwork? {
+        val t = s.trim()
+        if ('-' !in t || '/' in t) return null
+        val dash = t.lastIndexOf('-')
+        if (dash == 0 || dash == t.length - 1) return null
+        if (t.substring(0, dash).contains('-') || t.substring(dash + 1).contains('-')) return null
+        val startRaw = t.substring(0, dash).trim()
+        val endRaw = t.substring(dash + 1).trim()
+        if (!isValidV4(startRaw) || !isValidV4(endRaw)) return null
+        val lo = minOf(ipv4ToLong(startRaw), ipv4ToLong(endRaw))
+        val hi = maxOf(ipv4ToLong(startRaw), ipv4ToLong(endRaw))
+        val total = hi - lo + 1
+        if (total <= 0 || total > 0x1_0000_0000L) return null
+        return IpNetwork(
+            original = "${longToIpv4(lo)}-${longToIpv4(hi)}",
+            version = 4,
+            prefixLen = 24,
+            numAddresses = total,
+            network = BigInteger.valueOf(lo - 1),
+            total = BigInteger.valueOf(total),
+            usable = total,
+        )
+    }
+
+    fun stripV4Port(s: String): String? {
+        val t = s.trim()
+        if (':' !in t) return null
+        val lastColon = t.lastIndexOf(':')
+        if (lastColon == 0 || lastColon == t.length - 1) return null
+        val addr = t.substring(0, lastColon)
+        val port = t.substring(lastColon + 1)
+        if (addr.contains(':') || port.isEmpty() || port.length > 5 || !port.all { it.isDigit() }) return null
+        return if (isValidV4(addr)) addr else null
+    }
+
+    fun isValidV4(s: String): Boolean {
+        val octets = s.split('.')
+        if (octets.size != 4) return false
         for (o in octets) {
-            if (o.isEmpty() || o.length > 3 || !o.all { it.isDigit() }) return null
-            if (o.length > 1 && o.startsWith("0")) return null
-            val n = o.toInt()
-            if (n > 255) return null
-            value = (value shl 8) or n.toLong()
+            if (o.isEmpty() || o.length > 3 || !o.all { it.isDigit() }) return false
+            if (o.length > 1 && o.startsWith("0")) return false
+            val n = o.toIntOrNull() ?: return false
+            if (n > 255) return false
         }
+        return true
+    }
+
+    fun looksLikeIpv6WithPort(s: String): Boolean {
+        if (':' !in s) return false
+        if (s.startsWith("[")) return false
+        val lastColon = s.lastIndexOf(':')
+        if (lastColon == 0 || lastColon == s.length - 1) return false
+        val tail = s.substring(lastColon + 1)
+        if (tail.isEmpty() || !tail.all { it.isDigit() }) return false
+        val rest = s.substring(0, lastColon)
+        if (':' !in rest) return false
+        if (tail.length >= 4) return true
+        return isParsableIpv6(rest)
+    }
+
+    private fun parseV4WithPort(s: String): IpNetwork? =
+        stripV4Port(s)?.let { parseV4(it, 32) }
+
+    private fun parseV4(addr: String, prefix: Int): IpNetwork? {
+        if (prefix !in 0..32 || !isValidV4(addr)) return null
+        val value = ipv4ToLong(addr)
         val mask = if (prefix == 0) 0L else ((-1L) shl (32 - prefix)) and 0xFFFFFFFFL
         val network = value and mask
         val total = 1L shl (32 - prefix)
@@ -204,4 +260,22 @@ object IpParser {
             usable = usable.min(BigInteger.valueOf(Long.MAX_VALUE)).toLong(),
         )
     }
+
+    private fun isParsableIpv6(s: String): Boolean {
+        if (':' !in s) return false
+        return try {
+            InetAddress.getByName(s).address.size == 16
+        } catch (e: UnknownHostException) {
+            false
+        }
+    }
+
+    private fun ipv4ToLong(s: String): Long {
+        var v = 0L
+        for (p in s.split('.')) v = (v shl 8) or p.toLong()
+        return v
+    }
+
+    private fun longToIpv4(v: Long): String =
+        "${(v ushr 24) and 0xFF}.${(v ushr 16) and 0xFF}.${(v ushr 8) and 0xFF}.${v and 0xFF}"
 }

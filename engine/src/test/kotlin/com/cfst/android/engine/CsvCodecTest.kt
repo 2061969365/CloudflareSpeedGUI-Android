@@ -151,4 +151,14 @@ class CsvCodecTest {
         assertEquals(1, parsed.size)
         assertEquals("香港,九龙\"区\n第2行", parsed.single().regionName)
     }
+
+    @Test
+    fun utf8_bom_with_header_produces_no_garbage_rows() {
+        val csv = "\uFEFF" + header + "\n104.16.1.1,443,12.34,,HKG,,10,20,0.5,香港"
+        val parsed = CsvCodec.parse(csv)
+        assertEquals(1, parsed.size)
+        val r = parsed.single()
+        assertEquals("104.16.1.1", r.ip)
+        assertEquals(443, r.port)
+    }
 }
